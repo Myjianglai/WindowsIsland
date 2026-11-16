@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using Island.Core.Events;
 
 namespace Island.App.Persistence;
 
@@ -13,6 +15,23 @@ internal enum MusicPreview { Off, Cover, Rhythm, Track, Lyric }
 internal enum NotchItem { Quotas, Music, System, Clock, Devices, Shelf, Todo }
 internal enum IslandWheelAction { None, Pages, Volume }
 internal sealed record PagePreference(IslandPage Page, bool Enabled);
+internal sealed record BatteryDeviceChoice(string Name, string Connection)
+{
+    public static BatteryDeviceChoice From(DeviceBattery device) =>
+        new(device.Name, device.Connection == "蓝牙 LE" ? "蓝牙" : device.Connection ?? "");
+
+    public static DeviceBattery[] Select(IReadOnlyList<DeviceBattery> devices, BatteryDeviceChoice[]? selected)
+    {
+        var known = devices.Where(device => device.Level != "未知").DistinctBy(From).ToArray();
+        if (selected is not null)
+        {
+            var byChoice = known.ToDictionary(From);
+            return selected.Where(byChoice.ContainsKey).Select(choice => byChoice[choice]).ToArray();
+        }
+        return known.Where(device => device.Connection != "本机").Take(2)
+            .Concat(known.Where(device => device.Connection == "本机").Take(1)).ToArray();
+    }
+}
 
 internal sealed record IslandPreferences
 {
@@ -45,6 +64,8 @@ internal sealed record IslandPreferences
     public IslandWheelAction WheelAction { get; init; }
     public NotchItem[] NotchOrder { get; init; } = Enum.GetValues<NotchItem>();
     public bool CompactDevices { get; init; }
+    // null 使用自动选择，空数组表示没有勾选任何设备。
+    public BatteryDeviceChoice[]? CompactBatteryDevices { get; init; }
     public bool CompactShelfCount { get; init; }
     public bool CompactTodo { get; init; } = true;
     public bool ShowMusicCover { get; init; } = true;
@@ -93,6 +114,8 @@ internal sealed record IslandPreferences
             WheelAction = Enum.IsDefined(WheelAction) ? WheelAction : IslandWheelAction.None,
             CompactWidth = Math.Clamp(CompactWidth, 72, 720),
             CompactHeight = Math.Clamp(CompactHeight, 24, 64),
+            CompactBatteryDevices = CompactBatteryDevices?.Where(device => device is not null &&
+                !string.IsNullOrWhiteSpace(device.Name) && device.Connection is not null).Distinct().ToArray(),
             NotchOrder = (NotchOrder ?? []).Where(item => Enum.IsDefined(item))
                 .Concat(Enum.GetValues<NotchItem>()).Distinct().ToArray(),
             Scale = Math.Clamp(Scale, 80, 140),

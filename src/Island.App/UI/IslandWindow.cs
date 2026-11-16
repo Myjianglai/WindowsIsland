@@ -74,6 +74,8 @@ internal sealed class IslandWindow : Window
     private QuotaAccountStatus[] _pinned = [];
 
     public event Action? IslandClicked;
+    public event Action<IReadOnlyList<DeviceBattery>>? DevicesChanged;
+    public IReadOnlyList<DeviceBattery> Devices => _deviceLevels;
     public event Action<IslandPreferences>? DockChanged;
     public bool IsDragging => _surface.IsMouseCaptured || _tabs.IsEditing;
     public bool IsEditingTodo => _tabs.IsEditingTodo;
@@ -259,6 +261,7 @@ internal sealed class IslandWindow : Window
         var devices = message.Devices?.ToArray() ?? [];
         if (_deviceLevels.SequenceEqual(devices)) return;
         _deviceLevels = devices;
+        DevicesChanged?.Invoke(devices);
         if (_preferences.CompactDevices) RefreshCompact();
     }
 
@@ -514,9 +517,7 @@ internal sealed class IslandWindow : Window
         }
         if (_preferences.CompactDevices)
         {
-            var known = _deviceLevels.Where(device => device.Level != "未知").ToArray();
-            var devices = known.Where(device => device.Connection != "本机").Take(2)
-                .Concat(known.Where(device => device.Connection == "本机").Take(1)).ToArray();
+            var devices = BatteryDeviceChoice.Select(_deviceLevels, _preferences.CompactBatteryDevices);
             foreach (var battery in devices)
             {
                 var color = battery.Low ? IslandTheme.Alert : IslandTheme.Muted;
@@ -528,12 +529,16 @@ internal sealed class IslandWindow : Window
                     Margin = new Thickness(7, 0, 4, 0), ToolTip = $"{battery.Name} · {battery.Level}", Children = { name, level } };
                 Target(NotchItem.Devices).Children.Add(label);
             }
-            if (known.Length > devices.Length)
+            if (_preferences.CompactBatteryDevices is null)
             {
-                var more = ExpandedTabs.Label($"+{known.Length - devices.Length}", 10, IslandTheme.Muted);
-                more.VerticalAlignment = VerticalAlignment.Center;
-                more.ToolTip = string.Join(Environment.NewLine, known.Select(device => $"{device.Name} · {device.Level}"));
-                Target(NotchItem.Devices).Children.Add(more);
+                var known = _deviceLevels.Where(device => device.Level != "未知").DistinctBy(BatteryDeviceChoice.From).ToArray();
+                if (known.Length > devices.Length)
+                {
+                    var more = ExpandedTabs.Label($"+{known.Length - devices.Length}", 10, IslandTheme.Muted);
+                    more.VerticalAlignment = VerticalAlignment.Center;
+                    more.ToolTip = string.Join(Environment.NewLine, known.Select(device => $"{device.Name} · {device.Level}"));
+                    Target(NotchItem.Devices).Children.Add(more);
+                }
             }
         }
         if (_preferences.CompactShelfCount && _tabs.HasShelf && _tabs.ShelfCount > 0)

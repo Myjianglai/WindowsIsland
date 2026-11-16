@@ -5,8 +5,11 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Media;
 using Island.App.Persistence;
+using Island.Core.Events;
 using Forms = System.Windows.Forms;
 
 namespace Island.App.UI;
@@ -14,6 +17,7 @@ namespace Island.App.UI;
 internal sealed class GeneralSettings : ScrollViewer
 {
     public StackPanel QuotaAppearance { get; } = new();
+    private readonly CompactBatterySettings _batterySettings;
     private readonly Dictionary<string, StackPanel> _groups = new();
     private sealed record MonitorChoice(string? Id, string Label);
 
@@ -85,6 +89,9 @@ internal sealed class GeneralSettings : ScrollViewer
             }
         }
         BuildNotchRows();
+        _batterySettings = new CompactBatterySettings(settings.CompactBatteryDevices);
+        _batterySettings.SetBinding(IsEnabledProperty, new Binding(nameof(ToggleButton.IsChecked)) { Source = compactDevices });
+        compactContent.Children.Add(_batterySettings);
         SettingsRows.Section(compact, "尺寸与位置");
         var edges = new[] { DockEdge.Top, DockEdge.Bottom, DockEdge.Left, DockEdge.Right };
         var edgeChoices = SettingsRows.Choices(Array.IndexOf(edges, dockEdge),
@@ -199,6 +206,7 @@ internal sealed class GeneralSettings : ScrollViewer
             compactMusic.IsChecked = defaults.ShowCompactMusic;
             compactClock.IsChecked = defaults.CompactClock;
             compactDevices.IsChecked = defaults.CompactDevices;
+            _batterySettings.Reset();
             compactShelfCount.IsChecked = defaults.CompactShelfCount;
             compactTodo.IsChecked = defaults.CompactTodo;
             cover.IsChecked = defaults.ShowMusicCover;
@@ -267,6 +275,7 @@ internal sealed class GeneralSettings : ScrollViewer
                 HideForFullscreen = fullscreen.IsChecked == true, IndicatorWhenMaximized = maximized.IsChecked == true,
                 CompactClock = compactClock.IsChecked == true,
                 CompactDevices = compactDevices.IsChecked == true, CompactShelfCount = compactShelfCount.IsChecked == true,
+                CompactBatteryDevices = _batterySettings.Selection,
                 CompactTodo = compactTodo.IsChecked == true,
                 ShowMusicCover = cover.IsChecked == true, ShowMusicRhythm = rhythm.IsChecked == true,
                 CompactMusic = preview.SelectedIndex switch { 1 => MusicPreview.Track, 2 => MusicPreview.Lyric, _ => MusicPreview.Off },
@@ -303,6 +312,8 @@ internal sealed class GeneralSettings : ScrollViewer
         QuotaAppearance.Children.Add(quotaStatus);
         ShowSection("岛体外观");
     }
+
+    public void UpdateDevices(IReadOnlyList<DeviceBattery> devices) => _batterySettings.UpdateDevices(devices);
 
     public void ShowSection(string section)
     {

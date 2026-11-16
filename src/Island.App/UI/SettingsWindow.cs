@@ -13,6 +13,10 @@ namespace Island.App.UI;
 
 internal sealed class SettingsWindow : Window
 {
+    private readonly GeneralSettings _general;
+
+    public void UpdateDevices(IReadOnlyList<DeviceBattery> devices) => _general.UpdateDevices(devices);
+
     public SettingsWindow(SettingsStore store, Func<Dictionary<string, bool>, Task> applySources,
         QuotaAccountStore quotaAccounts, Action refreshQuotas, IslandPreferences preferences, Action<IslandPreferences> applyPreferences,
         Func<Guid, IReadOnlyList<QuotaMetric>> metricsFor)
@@ -103,7 +107,7 @@ internal sealed class SettingsWindow : Window
         };
         content.Children.Add(save);
         content.Children.Add(status);
-        var general = new GeneralSettings(preferences, applyPreferences);
+        var general = _general = new GeneralSettings(preferences, applyPreferences);
         var sidebar = new StackPanel { Margin = new Thickness(10, 24, 10, 16) };
         var brand = new TextBlock { Text = "灵动岛", FontSize = 28, FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(11, 0, 0, 23), Foreground = SettingsRows.Ink };

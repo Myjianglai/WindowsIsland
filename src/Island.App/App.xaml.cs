@@ -130,6 +130,13 @@ public partial class App : Application
         {
             _settings = new SettingsWindow(_store, ApplySourcesAsync, _quotaAccounts, _quotas.Refresh,
                 _preferences, ApplyPreferences, _quotas.MetricsFor);
+            if (MainWindow is IslandWindow island)
+            {
+                var settings = _settings;
+                settings.UpdateDevices(island.Devices);
+                island.DevicesChanged += settings.UpdateDevices;
+                settings.Closed += (_, _) => island.DevicesChanged -= settings.UpdateDevices;
+            }
             _settings.Closed += (_, _) => _settings = null;
             _settings.Show();
         }
