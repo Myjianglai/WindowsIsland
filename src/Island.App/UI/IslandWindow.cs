@@ -520,13 +520,16 @@ internal sealed class IslandWindow : Window
             var devices = BatteryDeviceChoice.Select(_deviceLevels, _preferences.CompactBatteryDevices);
             foreach (var battery in devices)
             {
-                var color = battery.Low ? IslandTheme.Alert : IslandTheme.Muted;
+                var color = DeviceBatteryView.Tone(battery, _preferences.BatteryWarning, _preferences.BatteryCritical, IslandTheme.Muted);
                 var name = ExpandedTabs.Label(battery.Name, 10, color);
                 name.MaxWidth = 110;
                 var level = ExpandedTabs.Label(battery.Level, 10, color);
                 level.Margin = new Thickness(4, 0, 0, 0);
                 var label = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(7, 0, 4, 0), ToolTip = $"{battery.Name} · {battery.Level}", Children = { name, level } };
+                    Margin = new Thickness(7, 0, 4, 0), ToolTip = $"{battery.Name} · {battery.Level}",
+                    Children = { DeviceBatteryView.Gauge(battery, color, 17), name } };
+                name.Margin = new Thickness(4, 0, 0, 0);
+                if (_preferences.CompactBatteryNumbers) label.Children.Add(level);
                 Target(NotchItem.Devices).Children.Add(label);
             }
             if (_preferences.CompactBatteryDevices is null)

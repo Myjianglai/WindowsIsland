@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Windows.Input;
+using System.Windows.Threading;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Media;
 using Island.App.Persistence;
 using Island.Core.Events;
@@ -18,11 +18,23 @@ internal sealed class GeneralSettings : ScrollViewer
 {
     public StackPanel QuotaAppearance { get; } = new();
     private readonly CompactBatterySettings _batterySettings;
+    private readonly Action<IslandPreferences> _syncDock;
+    private readonly Action _flush;
+    private DispatcherOperation? _refresh;
+    public FrameworkElement BatteryAppearance => _batterySettings;
+    public event Action? OpenBatterySettings;
     private readonly Dictionary<string, StackPanel> _groups = new();
     private sealed record MonitorChoice(string? Id, string Label);
 
     public GeneralSettings(IslandPreferences settings, Action<IslandPreferences> apply)
     {
+        Action? applyPending = null;
+        bool syncingDock = false;
+        void QueueApply()
+        {
+            if (applyPending is not null && !syncingDock && _refresh is null)
+                _refresh = Dispatcher.InvokeAsync(applyPending, DispatcherPriority.Background);
+        }
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         var body = new StackPanel();
         Content = body;
@@ -62,7 +74,7 @@ internal sealed class GeneralSettings : ScrollViewer
             compactContent.Visibility = value == IslandShape.Indicator ? Visibility.Collapsed : Visibility.Visible;
             dimensions.Visibility = compactContent.Visibility;
         }
-        var shapeCards = AppearanceSettings.ShapeCards(shapeOrder, shape, SelectShape);
+        var shapeCards = AppearanceSettings.ShapeCards(shapeOrder, shape, value => { SelectShape(value); QueueApply(); });
         compact.Children.Add(shapeCards);
         compactContent.Children.Add(contentHeading);
         compact.Children.Add(compactContent);
@@ -89,13 +101,15 @@ internal sealed class GeneralSettings : ScrollViewer
             }
         }
         BuildNotchRows();
-        _batterySettings = new CompactBatterySettings(settings.CompactBatteryDevices);
-        _batterySettings.SetBinding(IsEnabledProperty, new Binding(nameof(ToggleButton.IsChecked)) { Source = compactDevices });
-        compactContent.Children.Add(_batterySettings);
+        _batterySettings = new CompactBatterySettings(settings, QueueApply, compactDevices);
+        var configureBattery = new Button { Content = "显示与设备 ›" };
+        configureBattery.SetResourceReference(StyleProperty, "SettingsAction");
+        configureBattery.Click += (_, _) => OpenBatterySettings?.Invoke();
+        compactContent.Children.Add(SettingsRows.Row("配置电量显示", configureBattery));
         SettingsRows.Section(compact, "尺寸与位置");
         var edges = new[] { DockEdge.Top, DockEdge.Bottom, DockEdge.Left, DockEdge.Right };
         var edgeChoices = SettingsRows.Choices(Array.IndexOf(edges, dockEdge),
-            index => dockEdge = edges[index], "顶部", "底部", "左侧", "右侧");
+            index => { dockEdge = edges[index]; QueueApply(); }, "顶部", "底部", "左侧", "右侧");
         compact.Children.Add(SettingsRows.Row("贴靠位置", edgeChoices));
         var autoWidth = Check(settings.AutoCompactWidth);
         dimensions.Children.Add(SettingsRows.Row("自适应宽度", autoWidth));
@@ -126,8 +140,8 @@ internal sealed class GeneralSettings : ScrollViewer
         QuotaAppearance.Children.Add(SettingsRows.Row("额度达到 70%／90% 时提醒", quotaWarnings));
         SettingsRows.Section(QuotaAppearance, "配额显示");
         bool useMultipleRings = settings.MultipleRings;
-        var ringChoices = SettingsRows.Choices(useMultipleRings ? 1 : 0, index => useMultipleRings = index == 1, "单环", "多环");
-        var quotaChoices = SettingsRows.Choices(showRemaining ? 1 : 0, index => showRemaining = index == 1, "已用额度", "剩余额度");
+        var ringChoices = SettingsRows.Choices(useMultipleRings ? 1 : 0, index => { useMultipleRings = index == 1; QueueApply(); }, "单环", "多环");
+        var quotaChoices = SettingsRows.Choices(showRemaining ? 1 : 0, index => { showRemaining = index == 1; QueueApply(); }, "已用额度", "剩余额度");
         QuotaAppearance.Children.Add(SettingsRows.Row("环的样式", ringChoices));
         QuotaAppearance.Children.Add(SettingsRows.Row("显示已用或剩余", quotaChoices));
         QuotaAppearance.Children.Add(SettingsRows.Row("环内显示首字母", ringInitial));
@@ -149,6 +163,9 @@ internal sealed class GeneralSettings : ScrollViewer
         display.Children.Add(SettingsRows.Row("时钟格式", clock));
         SettingsRows.Section(display, "歌词来源");
         var folder = new TextBox { Text = settings.LyricsFolder };
+        var lyrics = settings.LyricsFolder;
+        var folderError = Label("");
+        folderError.Foreground = SettingsRows.Brush("#A42532");
         var browse = new Button { Content = "选择…", Margin = new Thickness(5, 0, 0, 0), Padding = new Thickness(6, 2, 6, 2) };
         browse.Click += (_, _) =>
         {
@@ -157,10 +174,12 @@ internal sealed class GeneralSettings : ScrollViewer
             if (dialog.ShowDialog() == Forms.DialogResult.OK)
             {
                 folder.Text = dialog.SelectedPath;
+                ConfirmFolder();
             }
         };
         DockPanel.SetDock(browse, Dock.Right);
         display.Children.Add(SettingsRows.Row("本地 LRC 歌词文件夹", new DockPanel { Children = { browse, folder } }));
+        display.Children.Add(folderError);
         var autoLyrics = Check(settings.NeteaseOnlineLyrics);
         autoLyrics.ToolTip = "直连网易云音乐。优先发送歌曲 ID，必要时用歌名和歌手搜索。";
         display.Children.Add(SettingsRows.Row("网易云自动获取歌词（联网）", autoLyrics));
@@ -185,7 +204,7 @@ internal sealed class GeneralSettings : ScrollViewer
         expanded.Children.Add(SettingsRows.Row("每次打开时显示", startPage));
         expanded.Children.Add(SettingsRows.Row("右键点击打开设置", rightClick));
         var wheelChoices = SettingsRows.Choices((int)wheel,
-            index => wheel = (IslandWheelAction)index, "不做任何事", "切换页面", "调整音量");
+            index => { wheel = (IslandWheelAction)index; QueueApply(); }, "不做任何事", "切换页面", "调整音量");
         expanded.Children.Add(SettingsRows.Row("鼠标滚轮", wheelChoices));
 
         var defaults = new IslandPreferences();
@@ -206,7 +225,6 @@ internal sealed class GeneralSettings : ScrollViewer
             compactMusic.IsChecked = defaults.ShowCompactMusic;
             compactClock.IsChecked = defaults.CompactClock;
             compactDevices.IsChecked = defaults.CompactDevices;
-            _batterySettings.Reset();
             compactShelfCount.IsChecked = defaults.CompactShelfCount;
             compactTodo.IsChecked = defaults.CompactTodo;
             cover.IsChecked = defaults.ShowMusicCover;
@@ -246,26 +264,70 @@ internal sealed class GeneralSettings : ScrollViewer
         behavior.Children.Add(SettingsRows.Row("收起和展开时均置顶", topmost));
         behavior.Children.Add(SettingsRows.Row("全屏应用覆盖时隐藏小岛", fullscreen));
         behavior.Children.Add(SettingsRows.Row("最大化窗口覆盖时收成指示条", maximized));
-        var status = Label("");
-        var quotaStatus = Label("");
-        var applied = settings;
-        var save = SaveButton("应用外观设置");
-        var saveQuota = SaveButton("应用配额显示设置");
-        save.Click += (_, _) => Save();
-        saveQuota.Click += (_, _) => Commit(applied with
+        var avoidApps = settings.AvoidApps;
+
+        void ConfirmFolder()
         {
-            QuotaWarnings = quotaWarnings.IsChecked == true, MultipleRings = useMultipleRings,
-            RingInitial = ringInitial.IsChecked == true, ShowRemaining = showRemaining
-        }, quotaStatus);
-        void Save()
-        {
-            var lyrics = folder.Text.Trim().Trim('"');
-            if (lyrics.Length > 0 && lyrics != settings.LyricsFolder && !Directory.Exists(lyrics))
+            var proposed = folder.Text.Trim().Trim('"');
+            if (proposed.Length > 0 && proposed != lyrics && !Directory.Exists(proposed))
             {
-                status.Text = "请选择存在的歌词文件夹。";
+                folderError.Text = "请选择存在的歌词文件夹。";
                 return;
             }
-            var next = applied with
+            folderError.Text = "";
+            if (proposed == lyrics) return;
+            lyrics = proposed;
+            QueueApply();
+        }
+        void ConfirmAvoidApps()
+        {
+            var next = avoid.Text.Split([',', '，', ';', '；'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (next.SequenceEqual(avoidApps)) return;
+            avoidApps = next;
+            QueueApply();
+        }
+        ObserveTextEntry(folder, ConfirmFolder);
+        ObserveTextEntry(avoid, ConfirmAvoidApps);
+
+        _syncDock = next =>
+        {
+            syncingDock = true;
+            try
+            {
+                dockEdge = next.Edge;
+                SettingsRows.SelectChoice(edgeChoices, Array.IndexOf(edges, next.Edge));
+                position.Value = next.Position;
+                int index = monitors.FindIndex(item => item.Id == next.Monitor);
+                if (index < 0)
+                {
+                    monitors.Add(new MonitorChoice(next.Monitor, next.Monitor!));
+                    monitor.Items.Refresh();
+                    index = monitors.Count - 1;
+                }
+                monitor.SelectedIndex = index;
+            }
+            finally { syncingDock = false; }
+        };
+
+        foreach (var toggle in contentOptions.Values.Select(option => option.Toggle).Concat(pageToggles.Values)
+            .Concat(new[] { oled, minimal, autoWidth, cover, rhythm, autoLyrics, rightClick, taskbar,
+                topmost, fullscreen, maximized, quotaWarnings, ringInitial }))
+        {
+            toggle.Checked += (_, _) => QueueApply();
+            toggle.Unchecked += (_, _) => QueueApply();
+        }
+        foreach (var choice in new[] { skin, preview, monitor, clock, startPage })
+            choice.SelectionChanged += (_, _) => QueueApply();
+        foreach (var slider in new[] { compactWidth, compactHeight, scale, position })
+            slider.ValueChanged += (_, _) => QueueApply();
+        notchOrder.CollectionChanged += (_, _) => QueueApply();
+        pages.CollectionChanged += (_, _) => QueueApply();
+
+        void Apply()
+        {
+            _refresh = null;
+            _batterySettings.SetSkin((IslandSkin)skin.SelectedIndex);
+            var next = settings with
             {
                 Edge = dockEdge, Position = (int)position.Value, Scale = (int)scale.Value,
                 AutoCompactWidth = autoWidth.IsChecked == true, CompactWidth = (int)compactWidth.Value,
@@ -274,8 +336,14 @@ internal sealed class GeneralSettings : ScrollViewer
                 InTaskbar = taskbar.IsChecked == true, AlwaysOnTop = topmost.IsChecked == true,
                 HideForFullscreen = fullscreen.IsChecked == true, IndicatorWhenMaximized = maximized.IsChecked == true,
                 CompactClock = compactClock.IsChecked == true,
+                QuotaWarnings = quotaWarnings.IsChecked == true, MultipleRings = useMultipleRings,
+                RingInitial = ringInitial.IsChecked == true, ShowRemaining = showRemaining,
                 CompactDevices = compactDevices.IsChecked == true, CompactShelfCount = compactShelfCount.IsChecked == true,
                 CompactBatteryDevices = _batterySettings.Selection,
+                ExpandedBatteryHidden = _batterySettings.ExpandedHidden,
+                CompactBatteryNumbers = _batterySettings.ShowNumbers,
+                BatteryWarning = _batterySettings.Warning,
+                BatteryCritical = _batterySettings.Critical,
                 CompactTodo = compactTodo.IsChecked == true,
                 ShowMusicCover = cover.IsChecked == true, ShowMusicRhythm = rhythm.IsChecked == true,
                 CompactMusic = preview.SelectedIndex switch { 1 => MusicPreview.Track, 2 => MusicPreview.Lyric, _ => MusicPreview.Off },
@@ -285,31 +353,20 @@ internal sealed class GeneralSettings : ScrollViewer
                 RightClickSettings = rightClick.IsChecked == true, WheelAction = wheel,
                 PixelShift = oled.IsChecked == true, Minimal = minimal.IsChecked == true,
                 Monitor = (monitor.SelectedItem as MonitorChoice)?.Id,
-                AvoidApps = avoid.Text.Split([',', '，', ';', '；'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
+                AvoidApps = avoidApps,
                 Use24HourClock = clock.SelectedIndex == 1,
                 LyricsFolder = lyrics, NeteaseOnlineLyrics = autoLyrics.IsChecked == true,
                 Pages = pages.Select(page => new PagePreference(page, pageToggles[page].IsChecked == true)).ToArray(), NotchOrder = notchOrder.ToArray()
             };
-            Commit(next, status);
+            apply(next);
         }
-        void Commit(IslandPreferences next, TextBlock feedback)
+        _flush = () =>
         {
-            try
-            {
-                next.Save();
-                applied = next;
-                apply(next);
-                feedback.Text = "已应用。";
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                feedback.Text = "无法保存常规设置。";
-            }
-        }
-        body.Children.Add(save);
-        body.Children.Add(status);
-        QuotaAppearance.Children.Add(saveQuota);
-        QuotaAppearance.Children.Add(quotaStatus);
+            ConfirmFolder();
+            ConfirmAvoidApps();
+            if (_refresh?.Abort() == true) Apply();
+        };
+        applyPending = Apply;
         ShowSection("岛体外观");
     }
 
@@ -325,11 +382,20 @@ internal sealed class GeneralSettings : ScrollViewer
     private static TextBlock Label(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 3) };
     private static CheckBox Check(bool value) => new() { IsChecked = value };
 
-    private static Button SaveButton(string label) => new()
+    public void SyncDock(IslandPreferences preferences) => _syncDock(preferences);
+
+    public void Flush() => _flush();
+
+    private static void ObserveTextEntry(TextBox field, Action confirm)
     {
-        Content = label, HorizontalAlignment = HorizontalAlignment.Left,
-        Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 12, 0, 0)
-    };
+        field.LostKeyboardFocus += (_, _) => confirm();
+        field.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            confirm();
+            e.Handled = true;
+        };
+    }
 
     public static string PageLabel(IslandPage page) => page switch
     {

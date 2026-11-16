@@ -66,6 +66,10 @@ internal sealed record IslandPreferences
     public bool CompactDevices { get; init; }
     // null 使用自动选择，空数组表示没有勾选任何设备。
     public BatteryDeviceChoice[]? CompactBatteryDevices { get; init; }
+    public BatteryDeviceChoice[] ExpandedBatteryHidden { get; init; } = [];
+    public bool CompactBatteryNumbers { get; init; } = true;
+    public int BatteryWarning { get; init; } = 25;
+    public int BatteryCritical { get; init; } = 15;
     public bool CompactShelfCount { get; init; }
     public bool CompactTodo { get; init; } = true;
     public bool ShowMusicCover { get; init; } = true;
@@ -116,6 +120,10 @@ internal sealed record IslandPreferences
             CompactHeight = Math.Clamp(CompactHeight, 24, 64),
             CompactBatteryDevices = CompactBatteryDevices?.Where(device => device is not null &&
                 !string.IsNullOrWhiteSpace(device.Name) && device.Connection is not null).Distinct().ToArray(),
+            ExpandedBatteryHidden = (ExpandedBatteryHidden ?? []).Where(device => device is not null &&
+                !string.IsNullOrWhiteSpace(device.Name) && device.Connection is not null).Distinct().ToArray(),
+            BatteryWarning = Math.Clamp(BatteryWarning, 0, 100),
+            BatteryCritical = Math.Clamp(BatteryCritical, 0, Math.Clamp(BatteryWarning, 0, 100)),
             NotchOrder = (NotchOrder ?? []).Where(item => Enum.IsDefined(item))
                 .Concat(Enum.GetValues<NotchItem>()).Distinct().ToArray(),
             Scale = Math.Clamp(Scale, 80, 140),

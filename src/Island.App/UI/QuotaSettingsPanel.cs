@@ -59,7 +59,8 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
         var delete = new Button { Content = "删除此账号", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(8, 0, 0, 0) };
         var save = new Button { Content = "保存账号", Padding = new Thickness(10, 4, 10, 4) };
         var update = new Button { Content = "立即刷新额度", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(8, 0, 0, 0) };
-        var discover = new Button { Content = "自动识别本机工具", Padding = new Thickness(10, 4, 10, 4), HorizontalAlignment = HorizontalAlignment.Left };
+        var discover = new Button { Content = "自动识别本机工具", Padding = new Thickness(10, 4, 10, 4),
+            Margin = new Thickness(8, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
 
         List<QuotaAccount> accounts;
         try
@@ -111,6 +112,7 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
                         pin.IsChecked = account.Pinned;
                 };
                 var details = new Button { Content = "›", Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0),
                     Width = 27, Height = 28, ToolTip = $"编辑 {account.Name}" };
                 System.Windows.Automation.AutomationProperties.SetName(details, $"编辑 {account.Name}");
                 details.Click += (_, _) =>

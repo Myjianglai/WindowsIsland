@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Island.App.Persistence;
 using Island.App.Presentation;
 using Island.App.Providers;
@@ -31,9 +33,14 @@ public partial class App : Application
     private ProviderHost? _deviceBattery;
     private Mutex? _instance;
     private IslandPreferences _preferences = IslandPreferences.Load();
+    private readonly DispatcherTimer _savePreferences = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private readonly MusicProvider _musicProvider = new();
 
-    public App() => _quotas = new QuotaProvider(_quotaAccounts);
+    public App()
+    {
+        _quotas = new QuotaProvider(_quotaAccounts);
+        _savePreferences.Tick += (_, _) => SavePreferences();
+    }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -48,9 +55,8 @@ public partial class App : Application
         var window = new IslandWindow(OpenSettings, _quotas.Refresh);
         window.DockChanged += preferences =>
         {
-            ApplyPreferences(preferences);
-            try { preferences.Save(); }
-            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { }
+            _settings?.SyncDock(preferences);
+            ChangePreferences(preferences);
         };
         var presenter = new IslandPresenter(window);
         MainWindow = window;
@@ -110,6 +116,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_savePreferences.IsEnabled) SavePreferences();
         _shutdown.Cancel();
         _events.Complete();
         if (_tray is not null)
@@ -129,7 +136,7 @@ public partial class App : Application
         if (_settings is null)
         {
             _settings = new SettingsWindow(_store, ApplySourcesAsync, _quotaAccounts, _quotas.Refresh,
-                _preferences, ApplyPreferences, _quotas.MetricsFor);
+                _preferences, ChangePreferences, _quotas.MetricsFor);
             if (MainWindow is IslandWindow island)
             {
                 var settings = _settings;
@@ -150,6 +157,27 @@ public partial class App : Application
         if (MainWindow is IslandWindow island)
         {
             island.ApplyPreferences(preferences);
+        }
+    }
+
+    private void ChangePreferences(IslandPreferences preferences)
+    {
+        ApplyPreferences(preferences);
+        _savePreferences.Stop();
+        _savePreferences.Start();
+    }
+
+    private void SavePreferences()
+    {
+        _savePreferences.Stop();
+        try
+        {
+            _preferences.Save();
+            _settings?.ShowPreferencesSaveError(null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _settings?.ShowPreferencesSaveError("更改已生效，但无法保存到本机。");
         }
     }
 

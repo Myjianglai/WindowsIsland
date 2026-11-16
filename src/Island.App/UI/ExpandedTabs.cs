@@ -227,6 +227,7 @@ internal sealed class ExpandedTabs : DockPanel
     {
         bool redrawQuotas = preferences.ShowRemaining != _preferences.ShowRemaining || preferences.Use24HourClock != _preferences.Use24HourClock;
         _preferences = preferences;
+        _devices.ApplyPreferences(preferences);
         if (redrawQuotas) SetQuota(_quotaSnapshot);
         _navigation.Children.Clear();
         var enabled = preferences.Pages.Where(page => page.Enabled).ToArray();

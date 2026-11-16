@@ -14,8 +14,16 @@ namespace Island.App.UI;
 internal sealed class SettingsWindow : Window
 {
     private readonly GeneralSettings _general;
+    private readonly TextBlock _saveError = new() { Foreground = SettingsRows.Brush("#A42532"),
+        TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10), Visibility = Visibility.Collapsed };
 
     public void UpdateDevices(IReadOnlyList<DeviceBattery> devices) => _general.UpdateDevices(devices);
+    public void SyncDock(IslandPreferences preferences) => _general.SyncDock(preferences);
+    public void ShowPreferencesSaveError(string? message)
+    {
+        _saveError.Text = message ?? "";
+        _saveError.Visibility = message is null ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     public SettingsWindow(SettingsStore store, Func<Dictionary<string, bool>, Task> applySources,
         QuotaAccountStore quotaAccounts, Action refreshQuotas, IslandPreferences preferences, Action<IslandPreferences> applyPreferences,
@@ -119,13 +127,15 @@ internal sealed class SettingsWindow : Window
             VerticalContentAlignment = VerticalAlignment.Stretch };
         var main = new DockPanel { Margin = new Thickness(35, 31, 30, 22), MaxWidth = 870 };
         DockPanel.SetDock(heading, Dock.Top);
+        DockPanel.SetDock(_saveError, Dock.Top);
         main.Children.Add(heading);
+        main.Children.Add(_saveError);
         main.Children.Add(page);
         void Category(string label) => sidebar.Children.Add(new TextBlock
         {
             Text = label, Foreground = SettingsRows.Muted, FontSize = 11, Margin = new Thickness(11, 15, 0, 5)
         });
-        void AddPage(string title, string glyph, FrameworkElement body, string? section = null)
+        Button AddPage(string title, string glyph, FrameworkElement body, string? section = null)
         {
             var icon = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"),
                 Width = 24, FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
@@ -145,6 +155,7 @@ internal sealed class SettingsWindow : Window
             };
             navigation.Add(button);
             sidebar.Children.Add(button);
+            return button;
         }
         Category("基础设置");
         AddPage("常规", "\uE713", startupPage);
@@ -155,6 +166,12 @@ internal sealed class SettingsWindow : Window
         Category("功能与连接");
         AddPage("数据源", "\uE90F", new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         AddPage("AI 额度", "\uE9D9", new QuotaSettingsPanel(quotaAccounts, refreshQuotas, metricsFor, general.QuotaAppearance));
+        Category("设备电量");
+        var batteries = AddPage("显示与设备", "\uE850", new ScrollViewer
+        {
+            Content = general.BatteryAppearance, VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        });
+        general.OpenBatterySettings += () => batteries.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Category("关于");
         AddPage("版本与更新", "\uE895", new ReleaseSettings());
         var rail = new Border { Width = 192, BorderBrush = SettingsRows.Rule, BorderThickness = new Thickness(0, 0, 1, 0),
@@ -167,5 +184,6 @@ internal sealed class SettingsWindow : Window
             Children = { rail, main }
         };
         navigation[0].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Closing += (_, _) => general.Flush();
     }
 }
