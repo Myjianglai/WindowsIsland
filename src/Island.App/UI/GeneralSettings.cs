@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using Island.App.Persistence;
 using Forms = System.Windows.Forms;
@@ -14,6 +13,7 @@ namespace Island.App.UI;
 
 internal sealed class GeneralSettings : ScrollViewer
 {
+    public StackPanel QuotaAppearance { get; } = new();
     private readonly Dictionary<string, StackPanel> _groups = new();
     private sealed record MonitorChoice(string? Id, string Label);
 
@@ -22,40 +22,110 @@ internal sealed class GeneralSettings : ScrollViewer
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         var body = new StackPanel();
         Content = body;
-        Section(body, "岛体外观");
-        var edge = new ComboBox { ItemsSource = new[] { "顶部", "左侧", "右侧", "底部" }, SelectedIndex = (int)settings.Edge };
-        var position = Number(body, "沿停靠边的位置", 0, 100, settings.Position);
-        var scale = Number(body, "岛体大小", 80, 140, settings.Scale);
-        var oled = Check("OLED 像素偏移", settings.PixelShift);
-        var minimal = Check("极简模式（收起时只显示细线）", settings.Minimal);
-        body.Children.Insert(1, Label("停靠方向"));
-        body.Children.Insert(2, edge);
+        var compact = Group("岛体外观");
+        var display = Group("岛体显示");
+        var expanded = Group("展开外观");
+        var behavior = Group("窗口行为");
+        StackPanel Group(string name)
+        {
+            var group = new StackPanel();
+            _groups.Add(name, group);
+            body.Children.Add(group);
+            return group;
+        }
+
+        var dockEdge = settings.Edge;
+        var shape = settings.Shape;
         var skin = new ComboBox { ItemsSource = new[] { "经典黑", "奶油" }, SelectedIndex = (int)settings.Skin };
-        var shape = new ComboBox { ItemsSource = new[] { "胶囊", "刘海", "指示条" }, SelectedIndex = (int)settings.Shape };
-        body.Children.Add(Label("皮肤"));
-        body.Children.Add(skin);
-        body.Children.Add(Label("形态"));
-        body.Children.Add(shape);
-        var multipleRings = Check("每个账号使用多环（最多三个）", settings.MultipleRings);
-        var ringInitial = Check("配额环内显示账号首字母", settings.RingInitial);
-        var quotaWarnings = Check("额度达到 70%／90% 时提醒", settings.QuotaWarnings);
-        var quotaMode = new ComboBox { ItemsSource = new[] { "显示已用额度", "显示剩余额度" }, SelectedIndex = settings.ShowRemaining ? 1 : 0 };
+        var oled = Check(settings.PixelShift);
+        var minimal = Check(settings.Minimal);
+        var compactQuotas = Check(settings.CompactQuotas);
+        var compactSystem = Check(settings.CompactSystem);
+        var compactMusic = Check(settings.ShowCompactMusic);
+        var compactClock = Check(settings.CompactClock);
+        var compactDevices = Check(settings.CompactDevices);
+        var compactShelfCount = Check(settings.CompactShelfCount);
+        var compactTodo = Check(settings.CompactTodo);
+        SettingsRows.Section(compact, "收起样式");
+        var shapeOrder = new[] { IslandShape.Notch, IslandShape.Capsule, IslandShape.Indicator };
+        var compactContent = new StackPanel();
+        var dimensions = new StackPanel();
+        var contentHeading = Label("");
+        void SelectShape(IslandShape value)
+        {
+            shape = value;
+            contentHeading.Text = value == IslandShape.Notch ? "显示内容 · 刘海（可拖动排序）" : "显示内容 · 胶囊";
+            compactContent.Visibility = value == IslandShape.Indicator ? Visibility.Collapsed : Visibility.Visible;
+            dimensions.Visibility = compactContent.Visibility;
+        }
+        var shapeCards = AppearanceSettings.ShapeCards(shapeOrder, shape, SelectShape);
+        compact.Children.Add(shapeCards);
+        compactContent.Children.Add(contentHeading);
+        compact.Children.Add(compactContent);
+        SelectShape(shape);
+
+        var notchOrder = new ObservableCollection<NotchItem>(settings.NotchOrder);
+        var compactOrder = new StackPanel();
+        var contentOptions = new Dictionary<NotchItem, (string Title, CheckBox Toggle)>
+        {
+            [NotchItem.Quotas] = ("配额环", compactQuotas), [NotchItem.Music] = ("正在播放的音乐", compactMusic),
+            [NotchItem.System] = ("系统监控", compactSystem), [NotchItem.Shelf] = ("文件中转", compactShelfCount),
+            [NotchItem.Devices] = ("设备与电脑电量", compactDevices), [NotchItem.Clock] = ("时间", compactClock),
+            [NotchItem.Todo] = ("待办提醒", compactTodo)
+        };
+        compactContent.Children.Add(compactOrder);
+        void BuildNotchRows()
+        {
+            compactOrder.Children.Clear();
+            foreach (var item in notchOrder)
+            {
+                var (title, toggle) = contentOptions[item];
+                compactOrder.Children.Add(AppearanceSettings.OrderRow(title, toggle, item, notchOrder, BuildNotchRows,
+                    () => shape == IslandShape.Notch));
+            }
+        }
+        BuildNotchRows();
+        SettingsRows.Section(compact, "尺寸与位置");
+        var edges = new[] { DockEdge.Top, DockEdge.Bottom, DockEdge.Left, DockEdge.Right };
+        var edgeChoices = SettingsRows.Choices(Array.IndexOf(edges, dockEdge),
+            index => dockEdge = edges[index], "顶部", "底部", "左侧", "右侧");
+        compact.Children.Add(SettingsRows.Row("贴靠位置", edgeChoices));
+        var autoWidth = Check(settings.AutoCompactWidth);
+        dimensions.Children.Add(SettingsRows.Row("自适应宽度", autoWidth));
+        var compactWidth = AppearanceSettings.Number(dimensions, "宽度（沿停靠边）", 72, 720, settings.CompactWidth, " DIP");
+        var compactHeight = AppearanceSettings.Number(dimensions, "高度（垂直停靠边）", 24, 64, settings.CompactHeight, " DIP");
+        compactWidth.IsEnabled = !settings.AutoCompactWidth;
+        autoWidth.Checked += (_, _) => compactWidth.IsEnabled = false;
+        autoWidth.Unchecked += (_, _) => compactWidth.IsEnabled = true;
+        compact.Children.Add(dimensions);
+        var scale = AppearanceSettings.Number(compact, "岛体大小", 80, 140, settings.Scale);
+        var position = AppearanceSettings.Number(compact, "沿停靠边的位置", 0, 100, settings.Position);
+        compact.Children.Add(SettingsRows.Row("皮肤", skin));
+        compact.Children.Add(SettingsRows.Row("OLED 像素偏移", oled));
+        compact.Children.Add(SettingsRows.Row("极简模式", minimal));
+
+        var ringInitial = Check(settings.RingInitial);
+        var quotaWarnings = Check(settings.QuotaWarnings);
+        bool showRemaining = settings.ShowRemaining;
         var preview = new ComboBox { ItemsSource = new[] { "不显示文字", "歌名", "当前歌词" },
             SelectedIndex = settings.CompactMusic is MusicPreview.Track ? 1 : settings.CompactMusic is MusicPreview.Lyric ? 2 : 0 };
-        var cover = Check("显示专辑封面", settings.ShowMusicCover || settings.CompactMusic == MusicPreview.Cover);
-        var rhythm = Check("显示随声音变化的律动条", settings.ShowMusicRhythm || settings.CompactMusic == MusicPreview.Rhythm);
-        body.Children.Add(multipleRings);
-        body.Children.Add(ringInitial);
-        body.Children.Add(quotaWarnings);
-        body.Children.Add(Label("额度百分比"));
-        body.Children.Add(quotaMode);
-        body.Children.Add(Label("收起时的音乐预览"));
-        body.Children.Add(preview);
-        body.Children.Add(cover);
-        body.Children.Add(rhythm);
-        body.Children.Add(oled);
-        body.Children.Add(minimal);
-        Section(body, "岛体显示");
+        var cover = Check(settings.ShowMusicCover || settings.CompactMusic == MusicPreview.Cover);
+        var rhythm = Check(settings.ShowMusicRhythm || settings.CompactMusic == MusicPreview.Rhythm);
+        SettingsRows.Section(compactContent, "音乐预览");
+        compactContent.Children.Add(SettingsRows.Row("预览文字", preview));
+        compactContent.Children.Add(SettingsRows.Row("显示专辑封面", cover));
+        compactContent.Children.Add(SettingsRows.Row("显示律动条", rhythm));
+        SettingsRows.Section(QuotaAppearance, "提示");
+        QuotaAppearance.Children.Add(SettingsRows.Row("额度达到 70%／90% 时提醒", quotaWarnings));
+        SettingsRows.Section(QuotaAppearance, "配额显示");
+        bool useMultipleRings = settings.MultipleRings;
+        var ringChoices = SettingsRows.Choices(useMultipleRings ? 1 : 0, index => useMultipleRings = index == 1, "单环", "多环");
+        var quotaChoices = SettingsRows.Choices(showRemaining ? 1 : 0, index => showRemaining = index == 1, "已用额度", "剩余额度");
+        QuotaAppearance.Children.Add(SettingsRows.Row("环的样式", ringChoices));
+        QuotaAppearance.Children.Add(SettingsRows.Row("显示已用或剩余", quotaChoices));
+        QuotaAppearance.Children.Add(SettingsRows.Row("环内显示首字母", ringInitial));
+
+        SettingsRows.Section(display, "显示器与时钟");
         var monitors = Forms.Screen.AllScreens.Select((screen, index) => new MonitorChoice(screen.DeviceName,
             $"显示器 {index + 1} · {screen.Bounds.Width} × {screen.Bounds.Height}{(screen.Primary ? "（主屏）" : "")}")).ToList();
         if (settings.Monitor is { } id && monitors.All(item => item.Id != id))
@@ -65,52 +135,12 @@ internal sealed class GeneralSettings : ScrollViewer
         monitors.Insert(0, new MonitorChoice(null, "跟随主显示器"));
         var monitor = new ComboBox { ItemsSource = monitors, DisplayMemberPath = nameof(MonitorChoice.Label) };
         monitor.SelectedIndex = Math.Max(0, monitors.FindIndex(item => item.Id == settings.Monitor));
-        body.Children.Add(Label("显示器"));
-        body.Children.Add(monitor);
-        body.Children.Add(Label("自动避让应用（进程名，用逗号分隔）"));
+        display.Children.Add(SettingsRows.Row("显示器", monitor));
         var avoid = new TextBox { Text = string.Join(", ", settings.AvoidApps), ToolTip = "例如 chrome.exe, obs64.exe" };
-        body.Children.Add(avoid);
+        display.Children.Add(SettingsRows.Row("自动避让应用（进程名，用逗号分隔）", avoid));
         var clock = new ComboBox { ItemsSource = new[] { "12 小时制", "24 小时制" }, SelectedIndex = settings.Use24HourClock ? 1 : 0 };
-        body.Children.Add(Label("时钟格式"));
-        body.Children.Add(clock);
-        var compactClock = Check("收起时显示时钟", settings.CompactClock);
-        var compactDevices = Check("收起时显示设备电量", settings.CompactDevices);
-        var compactShelfCount = Check("收起时显示置物架文件数", settings.CompactShelfCount);
-        body.Children.Add(compactClock);
-        body.Children.Add(compactDevices);
-        body.Children.Add(compactShelfCount);
-        body.Children.Add(Label("刘海收起时的内容顺序"));
-        var notchList = new ListBox { MaxHeight = 134 };
-        var notchOrder = new ObservableCollection<NotchItem>(settings.NotchOrder);
-        string NotchLabel(NotchItem item) => item switch
-        {
-            NotchItem.Quotas => "配额环", NotchItem.Music => "音乐预览", NotchItem.System => "系统读数",
-            NotchItem.Clock => "日期与时钟", NotchItem.Devices => "设备电量", _ => "置物架文件数"
-        };
-        void ShowNotchOrder(int selected)
-        {
-            notchList.ItemsSource = notchOrder.Select(NotchLabel).ToArray();
-            notchList.SelectedIndex = selected;
-        }
-        void MoveNotchItem(int direction)
-        {
-            int index = notchList.SelectedIndex;
-            int target = index + direction;
-            if (index < 0 || target < 0 || target >= notchOrder.Count) return;
-            notchOrder.Move(index, target);
-            ShowNotchOrder(target);
-        }
-        var up = new Button { Content = "上移", Margin = new Thickness(0, 0, 6, 0), Padding = new Thickness(7, 2, 7, 2) };
-        var down = new Button { Content = "下移", Padding = new Thickness(7, 2, 7, 2) };
-        up.Click += (_, _) => MoveNotchItem(-1);
-        down.Click += (_, _) => MoveNotchItem(1);
-        ShowNotchOrder(0);
-        body.Children.Add(notchList);
-        body.Children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0), Children = { up, down }
-        });
-        body.Children.Add(Label("本地 LRC 歌词文件夹"));
+        display.Children.Add(SettingsRows.Row("时钟格式", clock));
+        SettingsRows.Section(display, "歌词来源");
         var folder = new TextBox { Text = settings.LyricsFolder };
         var browse = new Button { Content = "选择…", Margin = new Thickness(5, 0, 0, 0), Padding = new Thickness(6, 2, 6, 2) };
         browse.Click += (_, _) =>
@@ -123,142 +153,154 @@ internal sealed class GeneralSettings : ScrollViewer
             }
         };
         DockPanel.SetDock(browse, Dock.Right);
-        body.Children.Add(new DockPanel { Children = { browse, folder } });
-        var autoLyrics = Check("网易云自动获取歌词（联网）", settings.NeteaseOnlineLyrics);
+        display.Children.Add(SettingsRows.Row("本地 LRC 歌词文件夹", new DockPanel { Children = { browse, folder } }));
+        var autoLyrics = Check(settings.NeteaseOnlineLyrics);
         autoLyrics.ToolTip = "直连网易云音乐。优先发送歌曲 ID，必要时用歌名和歌手搜索。";
-        body.Children.Add(autoLyrics);
-        Section(body, "展开外观");
-        body.Children.Add(Label("功能页面（勾选显示，拖动排序）"));
+        display.Children.Add(SettingsRows.Row("网易云自动获取歌词（联网）", autoLyrics));
+
+        SettingsRows.Section(expanded, "显示的页面（可拖动排序）");
         var pageList = new StackPanel();
-        var pages = new ObservableCollection<PagePreference>(settings.Pages);
+        expanded.Children.Add(pageList);
+        var pages = new ObservableCollection<IslandPage>(settings.Pages.Select(item => item.Page));
+        var pageToggles = settings.Pages.ToDictionary(item => item.Page, item => Check(item.Enabled));
         void BuildPages()
         {
             pageList.Children.Clear();
-            foreach (var item in pages)
-            {
-                var row = new DockPanel { Background = Brushes.Transparent, AllowDrop = true };
-                var grip = new TextBlock { Text = "≡", Cursor = Cursors.SizeAll, Padding = new Thickness(7, 2, 9, 3) };
-                grip.PreviewMouseMove += (_, e) =>
-                {
-                    if (e.LeftButton == MouseButtonState.Pressed)
-                    {
-                        DragDrop.DoDragDrop(grip, item.Page.ToString(), DragDropEffects.Move);
-                    }
-                };
-                row.DragOver += (_, e) =>
-                {
-                    e.Effects = e.Data.GetDataPresent(DataFormats.StringFormat) ? DragDropEffects.Move : DragDropEffects.None;
-                    e.Handled = true;
-                };
-                row.Drop += (_, e) =>
-                {
-                    if (e.Data.GetData(DataFormats.StringFormat) is string value && Enum.TryParse<IslandPage>(value, out var key))
-                    {
-                        int from = pages.IndexOf(pages.FirstOrDefault(p => p.Page == key)!);
-                        int to = pages.IndexOf(pages.First(p => p.Page == item.Page));
-                        if (from >= 0 && from != to)
-                        {
-                            pages.Move(from, to);
-                            BuildPages();
-                        }
-                        e.Handled = true;
-                    }
-                };
-                var check = new CheckBox { Content = PageLabel(item.Page), IsChecked = item.Enabled, VerticalAlignment = VerticalAlignment.Center };
-                check.Click += (_, _) =>
-                {
-                    var index = pages.IndexOf(pages.First(page => page.Page == item.Page));
-                    pages[index] = item with { Enabled = check.IsChecked == true };
-                };
-                row.Children.Add(grip);
-                row.Children.Add(check);
-                pageList.Children.Add(row);
-            }
+            foreach (var page in pages)
+                pageList.Children.Add(AppearanceSettings.OrderRow("显示" + PageLabel(page), pageToggles[page], page, pages, BuildPages));
         }
         BuildPages();
-        body.Children.Add(pageList);
-        Section(body, "窗口行为");
-        var taskbar = Check("收起时放入 Windows 任务栏区域", settings.InTaskbar);
-        var topmost = Check("收起和展开时均置顶", settings.AlwaysOnTop);
-        var fullscreen = Check("全屏应用覆盖时隐藏小岛", settings.HideForFullscreen);
-        var maximized = Check("最大化窗口覆盖时收成指示条", settings.IndicatorWhenMaximized);
-        body.Children.Add(taskbar);
-        body.Children.Add(topmost);
-        body.Children.Add(fullscreen);
-        body.Children.Add(maximized);
+        SettingsRows.Section(expanded, "通用");
+        var startPage = new ComboBox { ItemsSource = new[] { "上次停留的页面" }.Concat(Enum.GetValues<IslandPage>().Select(PageLabel)),
+            SelectedIndex = settings.ExpandPage is { } configuredPage ? (int)configuredPage + 1 : 0 };
+        var rightClick = Check(settings.RightClickSettings);
+        var wheel = settings.WheelAction;
+        expanded.Children.Add(SettingsRows.Row("每次打开时显示", startPage));
+        expanded.Children.Add(SettingsRows.Row("右键点击打开设置", rightClick));
+        var wheelChoices = SettingsRows.Choices((int)wheel,
+            index => wheel = (IslandWheelAction)index, "不做任何事", "切换页面", "调整音量");
+        expanded.Children.Add(SettingsRows.Row("鼠标滚轮", wheelChoices));
+
+        var defaults = new IslandPreferences();
+        compact.Children.Insert(0, SettingsRows.ResetButton(() =>
+        {
+            ((RadioButton)shapeCards.Children[Array.IndexOf(shapeOrder, defaults.Shape)]).IsChecked = true;
+            SettingsRows.SelectChoice(edgeChoices, Array.IndexOf(edges, defaults.Edge));
+            autoWidth.IsChecked = defaults.AutoCompactWidth;
+            compactWidth.Value = defaults.CompactWidth;
+            compactHeight.Value = defaults.CompactHeight;
+            scale.Value = defaults.Scale;
+            position.Value = defaults.Position;
+            skin.SelectedIndex = (int)defaults.Skin;
+            oled.IsChecked = defaults.PixelShift;
+            minimal.IsChecked = defaults.Minimal;
+            compactQuotas.IsChecked = defaults.CompactQuotas;
+            compactSystem.IsChecked = defaults.CompactSystem;
+            compactMusic.IsChecked = defaults.ShowCompactMusic;
+            compactClock.IsChecked = defaults.CompactClock;
+            compactDevices.IsChecked = defaults.CompactDevices;
+            compactShelfCount.IsChecked = defaults.CompactShelfCount;
+            compactTodo.IsChecked = defaults.CompactTodo;
+            cover.IsChecked = defaults.ShowMusicCover;
+            rhythm.IsChecked = defaults.ShowMusicRhythm;
+            preview.SelectedIndex = 2;
+            notchOrder.Clear();
+            foreach (var item in defaults.NotchOrder) notchOrder.Add(item);
+            BuildNotchRows();
+        }));
+        expanded.Children.Insert(0, SettingsRows.ResetButton(() =>
+        {
+            pages.Clear();
+            foreach (var page in defaults.Pages)
+            {
+                pages.Add(page.Page);
+                pageToggles[page.Page].IsChecked = page.Enabled;
+            }
+            BuildPages();
+            startPage.SelectedIndex = 0;
+            rightClick.IsChecked = defaults.RightClickSettings;
+            SettingsRows.SelectChoice(wheelChoices, (int)defaults.WheelAction);
+        }));
+        QuotaAppearance.Children.Insert(0, SettingsRows.ResetButton(() =>
+        {
+            quotaWarnings.IsChecked = defaults.QuotaWarnings;
+            ringInitial.IsChecked = defaults.RingInitial;
+            SettingsRows.SelectChoice(ringChoices, defaults.MultipleRings ? 1 : 0);
+            SettingsRows.SelectChoice(quotaChoices, defaults.ShowRemaining ? 1 : 0);
+        }));
+
+        SettingsRows.Section(behavior, "窗口行为");
+        var taskbar = Check(settings.InTaskbar);
+        var topmost = Check(settings.AlwaysOnTop);
+        var fullscreen = Check(settings.HideForFullscreen);
+        var maximized = Check(settings.IndicatorWhenMaximized);
+        behavior.Children.Add(SettingsRows.Row("收起时放入 Windows 任务栏区域", taskbar));
+        behavior.Children.Add(SettingsRows.Row("收起和展开时均置顶", topmost));
+        behavior.Children.Add(SettingsRows.Row("全屏应用覆盖时隐藏小岛", fullscreen));
+        behavior.Children.Add(SettingsRows.Row("最大化窗口覆盖时收成指示条", maximized));
         var status = Label("");
-        var save = new Button { Content = "应用常规设置", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 4, 10, 4),
-            Margin = new Thickness(0, 12, 0, 0) };
-        save.Click += (_, _) =>
+        var quotaStatus = Label("");
+        var applied = settings;
+        var save = SaveButton("应用外观设置");
+        var saveQuota = SaveButton("应用配额显示设置");
+        save.Click += (_, _) => Save();
+        saveQuota.Click += (_, _) => Commit(applied with
+        {
+            QuotaWarnings = quotaWarnings.IsChecked == true, MultipleRings = useMultipleRings,
+            RingInitial = ringInitial.IsChecked == true, ShowRemaining = showRemaining
+        }, quotaStatus);
+        void Save()
         {
             var lyrics = folder.Text.Trim().Trim('"');
-            if (lyrics.Length > 0 && !Directory.Exists(lyrics))
+            if (lyrics.Length > 0 && lyrics != settings.LyricsFolder && !Directory.Exists(lyrics))
             {
                 status.Text = "请选择存在的歌词文件夹。";
                 return;
             }
-            var next = settings with
+            var next = applied with
             {
-                Edge = (DockEdge)edge.SelectedIndex, Position = (int)position.Value, Scale = (int)scale.Value,
-                Skin = (IslandSkin)skin.SelectedIndex, Shape = (IslandShape)shape.SelectedIndex,
+                Edge = dockEdge, Position = (int)position.Value, Scale = (int)scale.Value,
+                AutoCompactWidth = autoWidth.IsChecked == true, CompactWidth = (int)compactWidth.Value,
+                CompactHeight = (int)compactHeight.Value,
+                Skin = (IslandSkin)skin.SelectedIndex, Shape = shape,
                 InTaskbar = taskbar.IsChecked == true, AlwaysOnTop = topmost.IsChecked == true,
                 HideForFullscreen = fullscreen.IsChecked == true, IndicatorWhenMaximized = maximized.IsChecked == true,
-                QuotaWarnings = quotaWarnings.IsChecked == true,
-                MultipleRings = multipleRings.IsChecked == true, RingInitial = ringInitial.IsChecked == true,
-                ShowRemaining = quotaMode.SelectedIndex == 1, CompactClock = compactClock.IsChecked == true,
+                CompactClock = compactClock.IsChecked == true,
                 CompactDevices = compactDevices.IsChecked == true, CompactShelfCount = compactShelfCount.IsChecked == true,
+                CompactTodo = compactTodo.IsChecked == true,
                 ShowMusicCover = cover.IsChecked == true, ShowMusicRhythm = rhythm.IsChecked == true,
                 CompactMusic = preview.SelectedIndex switch { 1 => MusicPreview.Track, 2 => MusicPreview.Lyric, _ => MusicPreview.Off },
-                CompactLyrics = true,
+                CompactQuotas = compactQuotas.IsChecked == true, CompactSystem = compactSystem.IsChecked == true,
+                ShowCompactMusic = compactMusic.IsChecked == true,
+                ExpandPage = startPage.SelectedIndex > 0 ? (IslandPage)(startPage.SelectedIndex - 1) : null,
+                RightClickSettings = rightClick.IsChecked == true, WheelAction = wheel,
                 PixelShift = oled.IsChecked == true, Minimal = minimal.IsChecked == true,
                 Monitor = (monitor.SelectedItem as MonitorChoice)?.Id,
                 AvoidApps = avoid.Text.Split([',', '，', ';', '；'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
                 Use24HourClock = clock.SelectedIndex == 1,
                 LyricsFolder = lyrics, NeteaseOnlineLyrics = autoLyrics.IsChecked == true,
-                Pages = pages.ToArray(), NotchOrder = notchOrder.ToArray()
+                Pages = pages.Select(page => new PagePreference(page, pageToggles[page].IsChecked == true)).ToArray(), NotchOrder = notchOrder.ToArray()
             };
+            Commit(next, status);
+        }
+        void Commit(IslandPreferences next, TextBlock feedback)
+        {
             try
             {
                 next.Save();
+                applied = next;
                 apply(next);
-                status.Text = "已应用。";
+                feedback.Text = "已应用。";
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                status.Text = "无法保存常规设置。";
+                feedback.Text = "无法保存常规设置。";
             }
-        };
-        body.Children.Add(save);
-        body.Children.Add(status);
-        var controls = body.Children.Cast<UIElement>().Where(item => item != save && item != status).ToArray();
-        body.Children.Clear();
-        StackPanel? group = null;
-        for (int i = 0; i < controls.Length; i++)
-        {
-            var item = controls[i];
-            if (item is TextBlock { Tag: "section" } header)
-            {
-                group = new StackPanel();
-                _groups.Add(header.Text, group);
-                body.Children.Add(group);
-                continue;
-            }
-            if (item is CheckBox { Content: string caption } check)
-                group!.Children.Add(SettingsRows.Row(caption, check));
-            else if (item is TextBlock label && i + 1 < controls.Length
-                && controls[i + 1] is FrameworkElement input && input is ComboBox or TextBox or Slider or DockPanel)
-            {
-                var row = SettingsRows.Row(label.Text, input);
-                if (input is Slider slider)
-                    slider.ValueChanged += (_, _) => ((TextBlock)((Grid)row.Child).Children[0]).Text = label.Text;
-                group!.Children.Add(row);
-                i++;
-            }
-            else
-                group!.Children.Add(item);
         }
         body.Children.Add(save);
         body.Children.Add(status);
+        QuotaAppearance.Children.Add(saveQuota);
+        QuotaAppearance.Children.Add(quotaStatus);
         ShowSection("岛体外观");
     }
 
@@ -270,25 +312,17 @@ internal sealed class GeneralSettings : ScrollViewer
     }
 
     private static TextBlock Label(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 3) };
-    private static CheckBox Check(string text, bool value) => new() { Content = text, IsChecked = value, Margin = new Thickness(0, 6, 0, 2) };
-    private static void Section(Panel panel, string text) => panel.Children.Add(new TextBlock
-    {
-        Text = text, Tag = "section", FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 3)
-    });
+    private static CheckBox Check(bool value) => new() { IsChecked = value };
 
-    private static Slider Number(Panel panel, string label, int min, int max, int value)
+    private static Button SaveButton(string label) => new()
     {
-        var caption = Label($"{label}  {value}%");
-        var slider = new Slider { Minimum = min, Maximum = max, Value = value, TickFrequency = 1, IsSnapToTickEnabled = true };
-        slider.ValueChanged += (_, _) => caption.Text = $"{label}  {slider.Value:0}%";
-        panel.Children.Add(caption);
-        panel.Children.Add(slider);
-        return slider;
-    }
+        Content = label, HorizontalAlignment = HorizontalAlignment.Left,
+        Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 12, 0, 0)
+    };
 
     public static string PageLabel(IslandPage page) => page switch
     {
         IslandPage.Music => "音乐", IslandPage.Clipboard => "剪贴板", IslandPage.Quota => "AI 额度",
-        IslandPage.Devices => "设备", IslandPage.Shelf => "置物架", IslandPage.Todo => "待办清单", _ => "系统监控"
+        IslandPage.Devices => "设备电量", IslandPage.Shelf => "文件中转", IslandPage.Todo => "待办清单", _ => "系统监控"
     };
 }

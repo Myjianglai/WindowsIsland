@@ -23,6 +23,7 @@ public partial class App : Application
     private readonly QuotaAccountStore _quotaAccounts = new();
     private readonly QuotaProvider _quotas;
     private Forms.NotifyIcon? _tray;
+    private Icon? _appIcon;
     private SettingsWindow? _settings;
     private ProviderHost? _music;
     private ProviderHost? _clipboard;
@@ -66,10 +67,12 @@ public partial class App : Application
         });
         menu.Items.Add("重置位置", null, (_, _) => window.ResetPosition());
         menu.Items.Add("退出", null, (_, _) => Shutdown());
+        if (Environment.ProcessPath is { } path)
+            _appIcon = Icon.ExtractAssociatedIcon(path);
         _tray = new Forms.NotifyIcon
         {
             ContextMenuStrip = menu,
-            Icon = SystemIcons.Application,
+            Icon = _appIcon ?? SystemIcons.Application,
             Text = "Windows 灵动岛",
             Visible = true
         };
@@ -115,6 +118,7 @@ public partial class App : Application
             _tray.ContextMenuStrip?.Dispose();
             _tray.Dispose();
         }
+        _appIcon?.Dispose();
         _shutdown.Dispose();
         _instance?.Dispose();
         base.OnExit(e);
@@ -149,10 +153,10 @@ public partial class App : Application
             try
             {
                 await Task.WhenAll(
-                    _music.SetEnabledAsync(sources.GetValueOrDefault(MusicProvider.SourceId)),
-                    _clipboard.SetEnabledAsync(sources.GetValueOrDefault(ClipboardProvider.SourceId)),
-                    _systemMonitor.SetEnabledAsync(sources.GetValueOrDefault(SystemMonitorProvider.SourceId)),
-                    _deviceBattery.SetEnabledAsync(sources.GetValueOrDefault(DeviceBatteryProvider.SourceId, true)));
+                    _music.SetEnabledAsync(SettingsStore.SourceEnabled(sources, MusicProvider.SourceId)),
+                    _clipboard.SetEnabledAsync(SettingsStore.SourceEnabled(sources, ClipboardProvider.SourceId)),
+                    _systemMonitor.SetEnabledAsync(SettingsStore.SourceEnabled(sources, SystemMonitorProvider.SourceId)),
+                    _deviceBattery.SetEnabledAsync(SettingsStore.SourceEnabled(sources, DeviceBatteryProvider.SourceId)));
             }
             catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
             {

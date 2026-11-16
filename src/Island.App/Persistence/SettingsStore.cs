@@ -9,6 +9,9 @@ namespace Island.App.Persistence;
 
 internal sealed class SettingsStore
 {
+    public static bool SourceEnabled(IReadOnlyDictionary<string, bool> sources, string id) =>
+        sources.GetValueOrDefault(id, id is "music" or "device-battery");
+
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValue = "WindowsIsland";
     private readonly string _path = Path.Combine(LocalDataStore.DirectoryPath, "settings.json");
@@ -21,7 +24,7 @@ internal sealed class SettingsStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            // 初次启动或配置不可读取时，所有数据源默认关闭。
+            // 初次启动或配置不可读取时，使用各数据源的默认值。
             return new();
         }
     }

@@ -32,6 +32,35 @@
       </Setter.Value>
     </Setter>
   </Style>
+  <Style x:Key="SettingsChoice" TargetType="RadioButton">
+    <Setter Property="Foreground" Value="#485367" />
+    <Setter Property="Padding" Value="12,5" />
+    <Setter Property="MinHeight" Value="29" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RadioButton">
+          <Border x:Name="Face" CornerRadius="6" BorderThickness="1" BorderBrush="Transparent"
+                  Background="Transparent" Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Face" Property="Background" Value="#F5F6FA" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Face" Property="Background" Value="White" />
+              <Setter TargetName="Face" Property="BorderBrush" Value="#8592A6" />
+              <Setter Property="Foreground" Value="#182233" />
+              <Setter Property="FontWeight" Value="SemiBold" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Face" Property="BorderBrush" Value="#226BDC" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
   <Style x:Key="SettingsNav" TargetType="Button">
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="BorderThickness" Value="0" />

@@ -111,7 +111,7 @@ internal sealed class SystemDashboard : Grid
         _memoryBar.Value = metrics?.Memory ?? 0;
         _download.Text = $"↓ {Rate(metrics?.Download)} · 本次 {Bytes(metrics?.DownloadTotal)}";
         _upload.Text = $"↑ {Rate(metrics?.Upload)} · 本次 {Bytes(metrics?.UploadTotal)}";
-        _battery.Text = metrics?.BatteryPercent is { } percent ? $"电池 {percent}%{(metrics.Charging ? " · 充电中" : "")}" : "";
+        _battery.Text = metrics?.BatteryPercent is { } percent ? $"电脑电量 {percent}%{(metrics.Charging ? " · 充电中" : "")}" : "";
         RefreshRanking();
     }
 

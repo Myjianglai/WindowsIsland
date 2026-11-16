@@ -63,13 +63,18 @@ internal sealed class ExpandedTabs : DockPanel
         add => _todo.EditingChanged += value;
         remove => _todo.EditingChanged -= value;
     }
-    public void CheckTodoReminders(Func<IslandEvent, bool> publish) => _todo.CheckReminders(DateTimeOffset.Now, publish);
+    public event Action TodoItemsChanged
+    {
+        add => _todo.ItemsChanged += value;
+        remove => _todo.ItemsChanged -= value;
+    }
+    public void CheckTodoReminders(DateTimeOffset now, Func<IslandEvent, bool> publish) => _todo.CheckReminders(now, publish);
+    public TodoPreview? GetTodoPreview(DateTimeOffset now) => _todo.GetPreview(now);
     public bool HasMusic => _media is not null;
     public bool Playing => _media is { IsPlaying: true };
     public string TrackTitle => _title.Text;
     public ImageSource? CoverArt => _cover.Source;
-    public bool HasLyrics => _preferences.Pages.Any(page => page.Page == IslandPage.Music && page.Enabled)
-        && _media?.Lyrics is { Count: > 0 };
+    public bool HasLyrics => _media?.Lyrics is { Count: > 0 };
     public string? CurrentLyric
     {
         get
@@ -240,6 +245,25 @@ internal sealed class ExpandedTabs : DockPanel
     }
 
     public bool HasShelf => _enabled.Contains(IslandPage.Shelf);
+
+    public void SelectOpeningPage()
+    {
+        if (_preferences.ExpandPage is { } page && _enabled.Contains(page) && page != _selectedPage)
+            SelectPage(page);
+    }
+
+    public void HandleWheel(IslandWheelAction action, int direction)
+    {
+        if (action == IslandWheelAction.Pages && _enabled.Length > 1)
+        {
+            int index = Array.IndexOf(_enabled, _selectedPage);
+            SelectPage(_enabled[(index - direction + _enabled.Length) % _enabled.Length]);
+        }
+        else if (action == IslandWheelAction.Volume && AudioVolume.Read() is { } volume)
+        {
+            AudioVolume.Write(volume + direction * .05);
+        }
+    }
     public int ShelfCount => _shelf.Count;
     public event Action ShelfChanged
     {

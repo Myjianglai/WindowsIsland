@@ -24,7 +24,9 @@ internal sealed class TodoView : Grid
     private Guid? _selected;
     private DateTime _today = DateTime.Today;
     public event Action<bool>? EditingChanged;
+    public event Action? ItemsChanged;
     public bool IsEditing { get; private set; }
+    public TodoPreview? GetPreview(DateTimeOffset now) => _store.GetPreview(now);
 
     public TodoView(TodoStore? store = null)
     {
@@ -254,6 +256,7 @@ internal sealed class TodoView : Grid
             return false;
         }
         if (!IsEditing) Render();
+        ItemsChanged?.Invoke();
         return true;
     }
 

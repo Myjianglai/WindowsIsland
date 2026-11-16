@@ -70,7 +70,7 @@ internal sealed class SettingsWindow : Window
         {
             var toggle = new CheckBox
             {
-                IsChecked = sources.GetValueOrDefault(id, id == "device-battery"),
+                IsChecked = SettingsStore.SourceEnabled(sources, id),
                 Content = label,
                 Margin = new Thickness(0, 0, 0, 9)
             };
@@ -150,7 +150,7 @@ internal sealed class SettingsWindow : Window
         AddPage("窗口行为", "\uE737", general, "窗口行为");
         Category("功能与连接");
         AddPage("数据源", "\uE90F", new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        AddPage("AI 额度", "\uE9D9", new QuotaSettingsPanel(quotaAccounts, refreshQuotas, metricsFor));
+        AddPage("AI 额度", "\uE9D9", new QuotaSettingsPanel(quotaAccounts, refreshQuotas, metricsFor, general.QuotaAppearance));
         Category("关于");
         AddPage("版本与更新", "\uE895", new ReleaseSettings());
         var rail = new Border { Width = 192, BorderBrush = SettingsRows.Rule, BorderThickness = new Thickness(0, 0, 1, 0),

@@ -70,15 +70,12 @@ internal sealed class SystemMonitorProvider : IIslandProvider
             net = nextNet;
             downloadTotal += received;
             uploadTotal += sent;
-            var power = System.Windows.Forms.SystemInformation.PowerStatus;
-            int? battery = (power.BatteryChargeStatus & System.Windows.Forms.BatteryChargeStatus.NoSystemBattery) == 0
-                && power.BatteryLifePercent is >= 0 and <= 1 ? (int)Math.Round(power.BatteryLifePercent * 100) : null;
+            var (battery, charging) = DeviceBatteryProvider.ReadComputerBattery();
             publisher.TryPublish(new IslandEvent(Id, IslandEventType.SystemMetrics, "系统监控",
                 metrics: new SystemMetrics(cpuUsage, memory, hasNetworkSample ? received / elapsed : null,
                     hasNetworkSample ? sent / elapsed : null, perCore, ranked,
                     hasMemory ? mem.TotalPhysical - Math.Min(mem.AvailablePhysical, mem.TotalPhysical) : null,
-                    hasMemory ? mem.TotalPhysical : null, downloadTotal, uploadTotal, battery,
-                    (power.BatteryChargeStatus & System.Windows.Forms.BatteryChargeStatus.Charging) != 0)));
+                    hasMemory ? mem.TotalPhysical : null, downloadTotal, uploadTotal, battery, charging)));
         }
     }
 

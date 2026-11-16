@@ -69,6 +69,7 @@ internal sealed class IslandWindow : Window
     private double _taskbarThickness;
     private SystemMetrics? _metrics;
     private DeviceBattery[] _deviceLevels = [];
+    private TodoPreview? _todoPreview;
     private IslandState _state;
     private QuotaAccountStatus[] _pinned = [];
 
@@ -76,7 +77,12 @@ internal sealed class IslandWindow : Window
     public event Action<IslandPreferences>? DockChanged;
     public bool IsDragging => _surface.IsMouseCaptured || _tabs.IsEditing;
     public bool IsEditingTodo => _tabs.IsEditingTodo;
-    public void CheckTodoReminders(Func<IslandEvent, bool> publish) => _tabs.CheckTodoReminders(publish);
+    public void CheckTodoReminders(Func<IslandEvent, bool> publish)
+    {
+        var now = DateTimeOffset.Now;
+        _tabs.CheckTodoReminders(now, publish);
+        UpdateTodoPreview(now);
+    }
     public bool IsAvoided => _avoided || _fullscreen;
 
     public IslandWindow(Action openSettings, Action? refreshQuota = null)
@@ -101,6 +107,8 @@ internal sealed class IslandWindow : Window
 
         _tabs = new ExpandedTabs(openSettings, refreshQuota);
         _tabs.TodoEditingChanged += SetTodoKeyboardFocus;
+        _todoPreview = _tabs.GetTodoPreview(DateTimeOffset.Now);
+        _tabs.TodoItemsChanged += () => UpdateTodoPreview(DateTimeOffset.Now);
         _tabs.ShelfChanged += () =>
         {
             if (_preferences.CompactShelfCount) RefreshCompact();
@@ -141,6 +149,18 @@ internal sealed class IslandWindow : Window
         _surface.PreviewMouseLeftButtonDown += BeginDrag;
         _surface.PreviewMouseMove += MoveDrag;
         _surface.PreviewMouseLeftButtonUp += EndDrag;
+        _surface.MouseRightButtonUp += (_, e) =>
+        {
+            if (_state != IslandState.Expanded || !_preferences.RightClickSettings) return;
+            openSettings();
+            e.Handled = true;
+        };
+        _surface.MouseWheel += (_, e) =>
+        {
+            if (_state != IslandState.Expanded || _preferences.WheelAction == IslandWheelAction.None || e.Delta == 0) return;
+            _tabs.HandleWheel(_preferences.WheelAction, Math.Sign(e.Delta));
+            e.Handled = true;
+        };
         SystemEvents.DisplaySettingsChanged += OnDisplaysChanged;
         Closed += (_, _) => SystemEvents.DisplaySettingsChanged -= OnDisplaysChanged;
     }
@@ -183,6 +203,7 @@ internal sealed class IslandWindow : Window
             IslandTheme.Apply(Resources, preferences.Skin);
         }
         _preferences = preferences.Normalize();
+        _todoPreview = _preferences.CompactTodo ? _tabs.GetTodoPreview(DateTimeOffset.Now) : null;
         var scale = _preferences.Scale / 100d;
         Width = BaseWidth * scale;
         Height = BaseHeight * scale;
@@ -221,10 +242,11 @@ internal sealed class IslandWindow : Window
         bool hadPreview = ShowsMusic;
         bool hadLyrics = UsesCompactLyrics;
         var previousTitle = _tabs.TrackTitle;
+        bool hadCover = _tabs.CoverArt is not null;
         _tabs.SetMedia(message);
         if (hadPreview != ShowsMusic || hadLyrics != UsesCompactLyrics
-            || (_preferences.Shape == IslandShape.Notch && ShowsMusicText
-                && !UsesCompactLyrics && previousTitle != _tabs.TrackTitle))
+            || (ShowsMusic && (hadCover != (_tabs.CoverArt is not null)
+                || (ShowsMusicText && !UsesCompactLyrics && previousTitle != _tabs.TrackTitle))))
         {
             RefreshCompact();
         }
@@ -234,8 +256,19 @@ internal sealed class IslandWindow : Window
     public void SetDevices(IslandEvent message)
     {
         _tabs.SetDevices(message);
-        _deviceLevels = message.Devices?.ToArray() ?? [];
+        var devices = message.Devices?.ToArray() ?? [];
+        if (_deviceLevels.SequenceEqual(devices)) return;
+        _deviceLevels = devices;
         if (_preferences.CompactDevices) RefreshCompact();
+    }
+
+    private void UpdateTodoPreview(DateTimeOffset now)
+    {
+        if (!_preferences.CompactTodo) return;
+        var next = _tabs.GetTodoPreview(now);
+        if (next == _todoPreview) return;
+        _todoPreview = next;
+        RefreshCompact();
     }
     public void SetSystemMetrics(SystemMetrics? metrics)
     {
@@ -296,6 +329,8 @@ internal sealed class IslandWindow : Window
         _awaitingCollapse = completed is not null;
         _banner = message;
         var visualState = _avoided ? IslandState.Compact : state;
+        if (visualState == IslandState.Expanded && previousState == IslandState.Compact)
+            _tabs.SelectOpeningPage();
         bool returnToTaskbar = visualState == IslandState.Compact && (previousState != IslandState.Compact || completed is not null);
         double panelWidth = ExpandedWidth();
         if (visualState == IslandState.Expanded)
@@ -307,13 +342,16 @@ internal sealed class IslandWindow : Window
         compact?.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         bool vertical = _edge is DockEdge.Left or DockEdge.Right;
         double limit = BaseWidth - 24;
-        if (compact is not null && _preferences.Shape == IslandShape.Notch && DockScreen() is { } screen)
+        bool fixedSize = visualState == IslandState.Compact && !_preferences.AutoCompactWidth &&
+            !_preferences.Minimal && !_avoided && !_maximizedStrip && _preferences.Shape != IslandShape.Indicator;
+        double desiredLength = fixedSize ? _preferences.CompactWidth : (compact?.DesiredSize.Width ?? 0) + 18;
+        if ((fixedSize || compact is not null) && DockScreen() is { } screen)
         {
             var work = screen.WorkingArea;
             var dpi = GetTargetDpi(new System.Drawing.Point(work.Left + work.Width / 2, work.Top + work.Height / 2));
             var scale = _preferences.Scale / 100d;
             limit = Math.Max(StripLength, (vertical ? work.Height : work.Width) * 96 / (dpi * scale) - 26);
-            double needed = (Math.Min(compact.DesiredSize.Width + 18, limit) + 24) * scale;
+            double needed = (Math.Min(desiredLength, limit) + 24) * scale;
             if (vertical && needed > Height)
             {
                 Height = needed;
@@ -325,8 +363,8 @@ internal sealed class IslandWindow : Window
                 PlaceDock(!returnToTaskbar);
             }
         }
-        double length = compact is null ? StripLength : Math.Clamp(compact.DesiredSize.Width + 18, StripLength, limit);
-        double thickness = compact is null ? StripThickness : 38;
+        double length = compact is null && !fixedSize ? StripLength : Math.Clamp(desiredLength, StripLength, limit);
+        double thickness = compact is null && !fixedSize ? StripThickness : _preferences.CompactHeight;
         if (_inTaskbar) thickness = Math.Min(thickness, _taskbarThickness);
         var (width, height) = visualState switch
         {
@@ -401,14 +439,20 @@ internal sealed class IslandWindow : Window
             }
             return panel;
         }
-        foreach (var account in _pinned)
-            Target(NotchItem.Quotas).Children.Add(QuotaDisplay.Badge(account, _preferences));
+        if (_preferences.CompactQuotas)
+            foreach (var account in _pinned)
+                Target(NotchItem.Quotas).Children.Add(QuotaDisplay.Badge(account, _preferences));
         if (ShowsMusic)
         {
             if (_preferences.ShowMusicCover || _preferences.CompactMusic == MusicPreview.Cover)
             {
-                _compactCover = new Image { Source = _tabs.CoverArt, Width = 27, Height = 27, Stretch = Stretch.UniformToFill };
-                var cover = new Border { Child = _compactCover, CornerRadius = new CornerRadius(5), Margin = new Thickness(5, 0, 5, 0),
+                FrameworkElement artwork;
+                if (_tabs.CoverArt is { } source)
+                    artwork = _compactCover = new Image { Source = source, Width = 27, Height = 27, Stretch = Stretch.UniformToFill };
+                else
+                    artwork = new TextBlock { Text = "♫", FontSize = 14, TextAlignment = TextAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center, Foreground = (Brush)Resources[IslandTheme.Ink] };
+                var cover = new Border { Child = artwork, Width = 27, Height = 27, CornerRadius = new CornerRadius(5), Margin = new Thickness(5, 0, 5, 0),
                     VerticalAlignment = VerticalAlignment.Center, ToolTip = _tabs.TrackTitle };
                 cover.SetResourceReference(Border.BackgroundProperty, IslandTheme.Tile);
                 Target(NotchItem.Music).Children.Insert(0, cover);
@@ -439,7 +483,7 @@ internal sealed class IslandWindow : Window
                 Target(NotchItem.Music).Children.Add(_compactLyrics);
             }
         }
-        if (_metrics is not null)
+        if (_preferences.CompactSystem && _metrics is not null)
         {
             var metricsPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(7, 0, 5, 0) };
@@ -468,13 +512,29 @@ internal sealed class IslandWindow : Window
             _compactClock.VerticalAlignment = VerticalAlignment.Center;
             Target(NotchItem.Clock).Children.Add(_compactClock);
         }
-        if (_preferences.CompactDevices && _deviceLevels.FirstOrDefault(device => device.Level != "未知") is { } battery)
+        if (_preferences.CompactDevices)
         {
-            var label = ExpandedTabs.Label("电量 " + battery.Level, 10, battery.Low ? IslandTheme.Alert : IslandTheme.Muted);
-            label.ToolTip = string.Join(Environment.NewLine, _deviceLevels.Select(device => $"{device.Name} · {device.Level}"));
-            label.Margin = new Thickness(7, 0, 4, 0);
-            label.VerticalAlignment = VerticalAlignment.Center;
-            Target(NotchItem.Devices).Children.Add(label);
+            var known = _deviceLevels.Where(device => device.Level != "未知").ToArray();
+            var devices = known.Where(device => device.Connection != "本机").Take(2)
+                .Concat(known.Where(device => device.Connection == "本机").Take(1)).ToArray();
+            foreach (var battery in devices)
+            {
+                var color = battery.Low ? IslandTheme.Alert : IslandTheme.Muted;
+                var name = ExpandedTabs.Label(battery.Name, 10, color);
+                name.MaxWidth = 110;
+                var level = ExpandedTabs.Label(battery.Level, 10, color);
+                level.Margin = new Thickness(4, 0, 0, 0);
+                var label = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(7, 0, 4, 0), ToolTip = $"{battery.Name} · {battery.Level}", Children = { name, level } };
+                Target(NotchItem.Devices).Children.Add(label);
+            }
+            if (known.Length > devices.Length)
+            {
+                var more = ExpandedTabs.Label($"+{known.Length - devices.Length}", 10, IslandTheme.Muted);
+                more.VerticalAlignment = VerticalAlignment.Center;
+                more.ToolTip = string.Join(Environment.NewLine, known.Select(device => $"{device.Name} · {device.Level}"));
+                Target(NotchItem.Devices).Children.Add(more);
+            }
         }
         if (_preferences.CompactShelfCount && _tabs.HasShelf && _tabs.ShelfCount > 0)
         {
@@ -482,6 +542,15 @@ internal sealed class IslandWindow : Window
             label.VerticalAlignment = VerticalAlignment.Center;
             label.Margin = new Thickness(6, 0, 3, 0);
             Target(NotchItem.Shelf).Children.Add(label);
+        }
+        if (_preferences.CompactTodo && _todoPreview is { } todo)
+        {
+            var label = ExpandedTabs.Label(todo.Text, 11, todo.Overdue ? IslandTheme.Alert : IslandTheme.Ink);
+            label.MaxWidth = 200;
+            label.Margin = new Thickness(7, 0, 5, 0);
+            label.VerticalAlignment = VerticalAlignment.Center;
+            label.ToolTip = todo.Description;
+            Target(NotchItem.Todo).Children.Add(label);
         }
         if (notch)
         {
@@ -550,14 +619,14 @@ internal sealed class IslandWindow : Window
         _wings.Data = shape;
     }
 
-    private bool ShowsMusic => _tabs.HasMusic && _preferences.Pages.Any(page => page.Page == IslandPage.Music && page.Enabled)
+    private bool ShowsMusic => _preferences.ShowCompactMusic && _tabs.HasMusic
         && (_preferences.ShowMusicCover || _preferences.ShowMusicRhythm || ShowsMusicText
             || _preferences.CompactMusic is MusicPreview.Cover or MusicPreview.Rhythm);
 
-    private bool ShowsMusicText => _preferences.CompactMusic is MusicPreview.Track or MusicPreview.Lyric;
+    private bool ShowsMusicText => _preferences.ShowCompactMusic && _preferences.CompactMusic is (MusicPreview.Track or MusicPreview.Lyric);
 
-    private bool UsesCompactLyrics => _preferences.CompactMusic == MusicPreview.Lyric
-        && _preferences.CompactLyrics && _tabs.HasLyrics;
+    private bool UsesCompactLyrics => _preferences.ShowCompactMusic && _preferences.CompactMusic == MusicPreview.Lyric
+        && _preferences.CompactLyrics && _edge == DockEdge.Top && _tabs.HasLyrics;
 
     private string MusicPreviewText() => UsesCompactLyrics
         ? _tabs.CurrentLyric ?? _tabs.TrackTitle : _tabs.TrackTitle;

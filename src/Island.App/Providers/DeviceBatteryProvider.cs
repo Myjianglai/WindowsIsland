@@ -29,6 +29,9 @@ internal sealed class DeviceBatteryProvider(Dispatcher dispatcher) : IIslandProv
         do
         {
             var devices = ReadControllers();
+            var (computer, charging) = ReadComputerBattery();
+            if (computer is { } percent)
+                devices.Add(new DeviceBattery("电脑", $"{percent}%{(charging ? " · 充电中" : "")}", percent <= 20 && !charging, percent, "本机"));
             try { devices.AddRange(await LogitechBattery.ReadAsync(cancellationToken)); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
             using var scan = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -44,6 +47,15 @@ internal sealed class DeviceBatteryProvider(Dispatcher dispatcher) : IIslandProv
                 devices.Count > 0 ? "设备电量" : "未发现可显示的已连接设备",
                 devices: devices.OrderByDescending(device => device.Low).ThenByDescending(device => device.Percent.HasValue).ToArray()), cancellationToken);
         } while (await timer.WaitForNextTickAsync(cancellationToken));
+    }
+
+    internal static (int? Percent, bool Charging) ReadComputerBattery()
+    {
+        var power = System.Windows.Forms.SystemInformation.PowerStatus;
+        var status = power.BatteryChargeStatus;
+        int? percent = (status & System.Windows.Forms.BatteryChargeStatus.NoSystemBattery) == 0 &&
+            power.BatteryLifePercent is >= 0 and <= 1 ? (int)Math.Round(power.BatteryLifePercent * 100) : null;
+        return (percent, percent.HasValue && (status & System.Windows.Forms.BatteryChargeStatus.Charging) != 0);
     }
 
     private async Task<DeviceBattery[]> ReadDevicesAsync(CancellationToken token)

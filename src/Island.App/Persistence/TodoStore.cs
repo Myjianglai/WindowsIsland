@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -17,13 +18,21 @@ internal sealed record TodoItem(Guid Id, string Title, DateTimeOffset? Reminder,
 
     public bool IsDue(DateTimeOffset now)
     {
-        if (Reminder is not { } reminder || IsDone(now) || !VisibleToday(now)) return false;
-        if (Weekly == 0) return RemindedAt is null && reminder <= now;
-        if (RemindedAt?.LocalDateTime.Date == now.LocalDateTime.Date) return false;
-        return reminder.LocalDateTime.Date <= now.LocalDateTime.Date
-            && reminder.LocalDateTime.TimeOfDay <= now.LocalDateTime.TimeOfDay;
+        return ReminderToday(now) is { } due && due <= now &&
+            (Weekly == 0 ? RemindedAt is null : RemindedAt?.LocalDateTime.Date != now.LocalDateTime.Date);
+    }
+
+    public DateTimeOffset? ReminderToday(DateTimeOffset now)
+    {
+        if (Reminder is not { } reminder || IsDone(now) || !VisibleToday(now)) return null;
+        var local = reminder.LocalDateTime;
+        if (Weekly == 0) return reminder;
+        var today = now.LocalDateTime.Date;
+        return local.Date <= today ? new DateTimeOffset(today + local.TimeOfDay) : null;
     }
 }
+
+internal sealed record TodoPreview(string Text, string Description, bool Overdue);
 
 internal sealed class TodoStore
 {
@@ -54,5 +63,22 @@ internal sealed class TodoStore
         {
             return false;
         }
+    }
+
+    public TodoPreview? GetPreview(DateTimeOffset now)
+    {
+        var pending = Items.Where(item => item.VisibleToday(now) && !item.IsDone(now)).ToArray();
+        if (pending.Length == 0) return null;
+        var next = pending.Select(item => (Item: item, Due: item.ReminderToday(now)))
+            .Where(item => item.Due.HasValue).OrderBy(item => item.Due).FirstOrDefault();
+        if (next.Due is not { } due)
+            return new TodoPreview($"待办 {pending.Length} 项", string.Join(Environment.NewLine, pending.Select(item => item.Title)), false);
+        bool overdue = due <= now;
+        var localDue = due.LocalDateTime;
+        var time = localDue.ToString(localDue.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var prefix = overdue ? "待办到期" : $"待办 {time}";
+        var extra = pending.Length > 1 ? $" +{pending.Length - 1}" : "";
+        return new TodoPreview($"{prefix} · {next.Item.Title}{extra}",
+            $"{time} · {next.Item.Title}{Environment.NewLine}共 {pending.Length} 项未完成", overdue);
     }
 }

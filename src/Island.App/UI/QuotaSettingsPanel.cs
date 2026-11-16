@@ -7,6 +7,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using Ellipse = System.Windows.Shapes.Ellipse;
 using Island.App.Providers;
 using Island.Core.Events;
 
@@ -18,15 +20,22 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
 {
     private sealed record RingChoice(string Key, string Label);
 
-    public QuotaSettingsPanel(QuotaAccountStore store, Action refresh, Func<Guid, IReadOnlyList<QuotaMetric>> metricsFor)
+    public QuotaSettingsPanel(QuotaAccountStore store, Action refresh, Func<Guid, IReadOnlyList<QuotaMetric>> metricsFor,
+        FrameworkElement appearance)
     {
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         var panel = new StackPanel();
+        panel.Children.Add(appearance);
+        SettingsRows.Section(panel, "应用与账号");
         var accountList = new ComboBox();
+        var accountRows = new StackPanel();
+        var editor = new StackPanel { Visibility = Visibility.Collapsed };
+        var add = new Button { Content = "＋ 添加账号", Padding = new Thickness(10, 4, 10, 4) };
         var services = new ComboBox { ItemsSource = Enum.GetValues<QuotaService>() };
         var name = new TextBox { MaxLength = 36 };
         var colors = new[] { "蓝色", "橙色", "绿色", "紫色" };
         var colorIds = new[] { "Blue", "Orange", "Green", "Purple" };
+        var swatches = new[] { "#97B9F7", "#EBA37D", "#91D8AC", "#B6A1EA" };
         var palette = new ComboBox { ItemsSource = colors };
         var pinned = new CheckBox { Content = "固定到收起的灵动岛（最多 3 个）", Margin = new Thickness(0, 10, 0, 2) };
         var localPath = new TextBox();
@@ -69,6 +78,54 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
             accountList.ItemsSource = new[] { "新建账号" }.Concat(
                 accounts.Select(account => $"{account.Service} · {account.Name}")).ToArray();
             accountList.SelectedIndex = selected;
+            accountRows.Children.Clear();
+            accountRows.Children.Add(new Border
+            {
+                BorderBrush = SettingsRows.Rule, BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(0, 10, 0, 8),
+                Child = Columns(Cell("额度来源"), Cell("显示名称"), Cell("主题"), Cell("固定"))
+            });
+            if (accounts.Count == 0)
+                accountRows.Children.Add(Label("暂无账号。可自动识别本机工具，或手动添加。"));
+            for (int i = 0; i < accounts.Count; i++)
+            {
+                int index = i;
+                var account = accounts[i];
+                var swatch = new Ellipse { Width = 17, Height = 17, VerticalAlignment = VerticalAlignment.Center,
+                    Fill = SettingsRows.Brush(swatches[Math.Max(0, Array.IndexOf(colorIds, account.Color))]),
+                    ToolTip = colors[Math.Max(0, Array.IndexOf(colorIds, account.Color))] };
+                var pin = new CheckBox { IsChecked = account.Pinned, IsEnabled = save.IsEnabled };
+                SettingsRows.StyleToggle(pin, $"固定 {account.Name} 到收起的小岛");
+                pin.Click += (_, _) =>
+                {
+                    bool enabled = pin.IsChecked == true;
+                    if (enabled && accounts.Count(item => item.Pinned) >= 3)
+                    {
+                        pin.IsChecked = false;
+                        status.Text = "最多固定 3 个账号。";
+                        return;
+                    }
+                    var updated = new List<QuotaAccount>(accounts);
+                    updated[index] = account with { Pinned = enabled };
+                    if (!Persist(updated, accountList.SelectedIndex, "已更新固定状态。"))
+                        pin.IsChecked = account.Pinned;
+                };
+                var details = new Button { Content = "›", Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+                    Width = 27, Height = 28, ToolTip = $"编辑 {account.Name}" };
+                System.Windows.Automation.AutomationProperties.SetName(details, $"编辑 {account.Name}");
+                details.Click += (_, _) =>
+                {
+                    accountList.SelectedIndex = index + 1;
+                    editor.Visibility = Visibility.Visible;
+                    editor.BringIntoView();
+                };
+                accountRows.Children.Add(new Border
+                {
+                    BorderBrush = SettingsRows.Rule, BorderThickness = new Thickness(0, 0, 0, 1),
+                    Padding = new Thickness(0, 10, 0, 10),
+                    Child = Columns(Cell(account.Service.ToString()), Cell(account.Name), swatch, pin, details)
+                });
+            }
         }
 
         void SetFields()
@@ -198,6 +255,13 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
             status.Text = "已请求刷新，结果会显示在 AI 额度页。";
         };
         discover.IsEnabled = save.IsEnabled;
+        add.IsEnabled = save.IsEnabled;
+        add.Click += (_, _) =>
+        {
+            accountList.SelectedIndex = 0;
+            editor.Visibility = Visibility.Visible;
+            name.Focus();
+        };
         discover.Click += (_, _) =>
         {
             var found = LocalAiDiscovery.Detect().Where(item => accounts.All(account => account.Service != item.Service)).ToArray();
@@ -217,7 +281,7 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
             Persist(next, accounts.Count + 1, $"已添加 {string.Join("、", found.Select(item => item.Name))}。");
         };
 
-        void Persist(List<QuotaAccount> updated, int selection, string success)
+        bool Persist(List<QuotaAccount> updated, int selection, string success)
         {
             try
             {
@@ -226,23 +290,26 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
                 RefreshList(selection);
                 refresh();
                 status.Text = success;
+                return true;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
             {
                 status.Text = "无法写入本机账号配置。";
+                return false;
             }
         }
 
+        SettingsRows.Section(editor, "账号详情");
         UIElement[] controls =
         {
-            discover, Label("已配置账号"), accountList, Label("服务"), services, Label("显示名称"), name,
+            Label("服务"), services, Label("显示名称"), name,
             Label("配色"), palette, pinned, localLabel, localPath, profileLabel, profilePath,
             passwordLabel, password, creditsLabel, credits, rings, note,
             new StackPanel
             {
                 Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0),
-                Children = { save, delete, update }
-            }, status
+                Children = { save, delete }
+            }
         };
         for (int index = 0; index < controls.Length; index++)
         {
@@ -250,19 +317,43 @@ internal sealed class QuotaSettingsPanel : ScrollViewer
             if (item is TextBlock label && index + 1 < controls.Length
                 && controls[index + 1] is FrameworkElement input && input is ComboBox or TextBox or PasswordBox)
             {
-                panel.Children.Add(SettingsRows.Row(label, input));
+                editor.Children.Add(SettingsRows.Row(label, input));
                 index++;
             }
             else if (item is CheckBox { Content: string caption } toggle)
-                panel.Children.Add(SettingsRows.Row(caption, toggle));
+                editor.Children.Add(SettingsRows.Row(caption, toggle));
             else
-                panel.Children.Add(item);
+                editor.Children.Add(item);
         }
+        panel.Children.Add(accountRows);
+        panel.Children.Add(new WrapPanel { Margin = new Thickness(0, 12, 0, 6), Children = { add, discover, update } });
+        panel.Children.Add(status);
+        panel.Children.Add(editor);
         Content = panel;
         RefreshList(0);
     }
 
     private static Visibility Show(bool show) => show ? Visibility.Visible : Visibility.Collapsed;
+
+    private static TextBlock Cell(string text) => new()
+    {
+        Text = text, Foreground = SettingsRows.Ink, TextTrimming = TextTrimming.CharacterEllipsis,
+        VerticalAlignment = VerticalAlignment.Center, ToolTip = text
+    };
+
+    private static Grid Columns(params FrameworkElement[] cells)
+    {
+        var grid = new Grid();
+        foreach (var width in new[] { new GridLength(1, GridUnitType.Star), new GridLength(2, GridUnitType.Star),
+                     new GridLength(48), new GridLength(55), new GridLength(30) })
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+        for (int index = 0; index < cells.Length; index++)
+        {
+            Grid.SetColumn(cells[index], index);
+            grid.Children.Add(cells[index]);
+        }
+        return grid;
+    }
 
     private static TextBlock Label(string value) => new()
     {

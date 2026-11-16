@@ -102,9 +102,10 @@ internal sealed class MusicProvider : IIslandProvider
                 var current = manager.GetCurrentSession();
                 if (current is null || current.GetPlaybackInfo()?.PlaybackStatus != PlaybackStatus.Playing)
                 {
-                    current = manager.GetSessions().FirstOrDefault(candidate =>
-                        IdentifyPlayer(candidate.SourceAppUserModelId) is not null
-                        && candidate.GetPlaybackInfo()?.PlaybackStatus == PlaybackStatus.Playing) ?? current;
+                    current = manager.GetSessions()
+                        .Where(candidate => candidate.GetPlaybackInfo()?.PlaybackStatus == PlaybackStatus.Playing)
+                        .OrderByDescending(candidate => IdentifyPlayer(candidate.SourceAppUserModelId) is not null)
+                        .FirstOrDefault() ?? current;
                 }
                 if (!Equals(current, session))
                 {
