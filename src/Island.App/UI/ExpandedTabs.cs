@@ -515,11 +515,16 @@ internal sealed class ExpandedTabs : DockPanel
             _lyric.Text = index >= 0 ? lines[index].Text : "";
             _nextLyric.Text = index + 1 < lines.Count ? lines[index + 1].Text : "";
         }
+        else if (lines is { Count: > 0 })
+        {
+            _previousLyric.Text = "等待播放器提供播放进度";
+            _lyric.Text = lines[0].Text;
+            _nextLyric.Text = lines.Count > 1 ? lines[1].Text : "";
+        }
         else
         {
             _previousLyric.Text = _nextLyric.Text = "";
-            _lyric.Text = _media is { HasPlaybackPosition: false, Lyrics.Count: > 0 }
-                ? "暂未读到网易云播放进度" : _media?.Player == "网易云音乐" && !_preferences.NeteaseOnlineLyrics
+            _lyric.Text = _media?.Player == "网易云音乐" && !_preferences.NeteaseOnlineLyrics
                 ? "可在设置中启用网易云自动获取歌词" : "暂无同步歌词";
         }
     }

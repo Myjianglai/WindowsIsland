@@ -23,12 +23,13 @@ internal sealed class NeteaseLyrics
     public async Task<IReadOnlyList<LyricLine>> FindAsync(
         string title, string artist, string? metadata, TimeSpan duration, CancellationToken token)
     {
-        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist)) return [];
+        var metadataId = LocalLyrics.GetNeteaseId(metadata);
+        if (metadataId is null && (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))) return [];
         var cacheKey = $"{title}\n{artist}\n{metadata}\n{Math.Round(duration.TotalSeconds)}";
         if (_cache.TryGetValue(cacheKey, out var known)) return known;
         try
         {
-            string? id = LocalLyrics.GetNeteaseId(metadata) ?? ReadQueueId(title, artist, duration);
+            string? id = metadataId ?? ReadQueueId(title, artist, duration);
             if (id is null)
             {
                 var lookup = await GetAsync("api/search/get/web?type=1&limit=8&s=" + Uri.EscapeDataString(title + " " + artist), token);

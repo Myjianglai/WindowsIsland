@@ -20,15 +20,16 @@ internal sealed partial class NeteaseClock
     private long _stamp;
     private bool _playing;
     private bool _resumeAfterBuffer;
+    private bool _hasPosition;
 
     public NeteaseClock() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "NetEase", "CloudMusic", "cloudmusic.elog")) { }
 
     internal NeteaseClock(string path) => _path = path;
 
-    internal readonly record struct Playback(TimeSpan Position, TimeSpan Duration, bool Playing, string Id);
+    internal readonly record struct Playback(TimeSpan Position, TimeSpan Duration, bool Playing, string Id, bool HasPosition);
 
-    public Playback? Read(string title)
+    public Playback? Read(string title, bool? playing = null)
     {
         try
         {
@@ -41,6 +42,8 @@ internal sealed partial class NeteaseClock
             {
                 _title = _id = "";
                 _stamp = 0;
+                _position = _duration = 0;
+                _playing = _resumeAfterBuffer = _hasPosition = false;
                 _created = created;
             }
             file.Position = replay ? from : _offset;
@@ -65,8 +68,10 @@ internal sealed partial class NeteaseClock
             }
             var now = Environment.TickCount64;
             if (_stamp <= 0 || _stamp > now || _duration <= 0 || _title != LocalLyrics.Normalize(title)) return null;
-            return new Playback(TimeSpan.FromSeconds(Math.Min(_duration, PositionAt(now))),
-                TimeSpan.FromSeconds(_duration), _playing, _id);
+            bool running = playing ?? _playing;
+            double position = Math.Max(0, _position + (running ? (now - _stamp) / 1000d : 0));
+            return new Playback(TimeSpan.FromSeconds(Math.Min(_duration, position)),
+                TimeSpan.FromSeconds(_duration), running, _id, _hasPosition);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -90,7 +95,7 @@ internal sealed partial class NeteaseClock
         var arguments = Encoding.UTF8.GetString(fields[(end + 1)..]).Trim();
         if (!arguments.StartsWith(',')) return;
         arguments = arguments[1..].Trim();
-        if (kind is not ("playOneTrackInPlayingList" or "setPlaying" or "nativePlay"
+        if (kind is not ("playOneTrackInPlayingList" or "setPlaying" or "nativePlay" or "refreshCurPlaying"
             or "pause" or "resume" or "setPlayingPosition" or "loadingSeek" or "PlayerBuffering" or "PlayerBufferingEnd")
             && !kind.StartsWith("native", StringComparison.Ordinal)) return;
         try
@@ -99,26 +104,32 @@ internal sealed partial class NeteaseClock
             var args = data.RootElement;
             if (args.GetArrayLength() == 0) return;
             var first = args[0];
-            if (kind is "playOneTrackInPlayingList" or "setPlaying" or "nativePlay")
+            var entry = kind == "refreshCurPlaying" && args.GetArrayLength() > 1 ? args[1] : first;
+            if (entry.ValueKind == JsonValueKind.Object &&
+                kind is ("playOneTrackInPlayingList" or "setPlaying" or "nativePlay" or "refreshCurPlaying"))
             {
-                if (first.ValueKind != JsonValueKind.Object || !first.TryGetProperty("track", out var track)
+                if (!entry.TryGetProperty("track", out var track)
                     || track.ValueKind != JsonValueKind.Object || !track.TryGetProperty("name", out var name)
                     || name.ValueKind != JsonValueKind.String || !track.TryGetProperty("id", out var identifier)
                     || !track.TryGetProperty("duration", out var length) || length.ValueKind != JsonValueKind.Number
                     || !length.TryGetDouble(out double milliseconds) || milliseconds is <= 0 or > 604800000) return;
                 string id = identifier.ToString();
-                if (id.Length == 0 || (id == _id && kind != "playOneTrackInPlayingList")) return;
+                if (id.Length == 0 || (id == _id && (kind == "refreshCurPlaying" || _hasPosition && kind != "playOneTrackInPlayingList"))) return;
                 _id = id;
                 _title = LocalLyrics.Normalize(name.GetString() ?? "");
                 _duration = milliseconds / 1000;
                 _resumeAfterBuffer = true;
+                _hasPosition = kind != "refreshCurPlaying";
                 Update(tick, 0, false);
             }
             else if (_id.Length > 0 && kind is "setPlayingPosition" or "loadingSeek")
             {
                 if (first.ValueKind == JsonValueKind.Number && first.TryGetDouble(out double seconds)
                     && seconds >= 0 && seconds <= _duration + 3)
+                {
+                    _hasPosition = true;
                     Update(tick, seconds, _playing);
+                }
             }
             else if (_id.Length > 0)
             {

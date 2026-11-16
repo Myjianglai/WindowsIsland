@@ -634,7 +634,7 @@ internal sealed class IslandWindow : Window
     private bool ShowsMusicText => _preferences.ShowCompactMusic && _preferences.CompactMusic is (MusicPreview.Track or MusicPreview.Lyric);
 
     private bool UsesCompactLyrics => _preferences.ShowCompactMusic && _preferences.CompactMusic == MusicPreview.Lyric
-        && _preferences.CompactLyrics && _edge == DockEdge.Top && _tabs.HasLyrics;
+        && _preferences.CompactLyrics && _edge is (DockEdge.Top or DockEdge.Bottom) && _tabs.HasLyrics;
 
     private string MusicPreviewText() => UsesCompactLyrics
         ? _tabs.CurrentLyric ?? _tabs.TrackTitle : _tabs.TrackTitle;
