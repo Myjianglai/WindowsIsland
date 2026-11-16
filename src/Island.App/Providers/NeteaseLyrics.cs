@@ -20,8 +20,15 @@ internal sealed class NeteaseLyrics
     };
     private readonly ConcurrentDictionary<string, IReadOnlyList<LyricLine>> _cache = new();
 
-    public async Task<IReadOnlyList<LyricLine>> FindAsync(
+    public Task<IReadOnlyList<LyricLine>> FindAsync(
         string title, string artist, string? metadata, TimeSpan duration, CancellationToken token)
+        => FindCoreAsync(title, artist, metadata, duration, true, token);
+
+    public Task<IReadOnlyList<LyricLine>> FindByTrackAsync(string title, string artist, TimeSpan duration, CancellationToken token)
+        => FindCoreAsync(title, artist, null, duration, false, token);
+
+    private async Task<IReadOnlyList<LyricLine>> FindCoreAsync(
+        string title, string artist, string? metadata, TimeSpan duration, bool useLocalQueue, CancellationToken token)
     {
         var metadataId = LocalLyrics.GetNeteaseId(metadata);
         if (metadataId is null && (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))) return [];
@@ -29,7 +36,7 @@ internal sealed class NeteaseLyrics
         if (_cache.TryGetValue(cacheKey, out var known)) return known;
         try
         {
-            string? id = metadataId ?? ReadQueueId(title, artist, duration);
+            string? id = metadataId ?? (useLocalQueue ? ReadQueueId(title, artist, duration) : null);
             if (id is null)
             {
                 var lookup = await GetAsync("api/search/get/web?type=1&limit=8&s=" + Uri.EscapeDataString(title + " " + artist), token);

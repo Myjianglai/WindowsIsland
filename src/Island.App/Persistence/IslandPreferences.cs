@@ -80,6 +80,7 @@ internal sealed record IslandPreferences
     public bool CompactLyrics { get; init; } = true;
     public string LyricsFolder { get; init; } = "";
     public bool NeteaseOnlineLyrics { get; init; }
+    public bool GeneralOnlineLyrics { get; init; }
     public PagePreference[] Pages { get; init; } =
         Enum.GetValues<IslandPage>().Select(page => new PagePreference(page, true)).ToArray();
 

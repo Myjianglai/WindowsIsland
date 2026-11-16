@@ -19,15 +19,16 @@ namespace Island.App.Providers;
 internal sealed class MusicProvider : IIslandProvider
 {
     public const string SourceId = "music";
-    private sealed record LyricsOptions(string Folder, bool Online);
-    private LyricsOptions _options = new("", false);
+    private sealed record LyricsOptions(string Folder, bool NeteaseOnline, bool GeneralOnline);
+    private LyricsOptions _options = new("", false, false);
     private readonly NeteaseLyrics _neteaseLyrics = new();
+    private readonly LrcLibLyrics _lrcLibLyrics = new();
     private event Action? LyricsFolderChanged;
     public string Id => SourceId;
 
-    public void SetLyricsOptions(string path, bool online)
+    public void SetLyricsOptions(string path, bool neteaseOnline, bool generalOnline)
     {
-        var next = new LyricsOptions(path, online);
+        var next = new LyricsOptions(path, neteaseOnline, generalOnline);
         if (Interlocked.Exchange(ref _options, next) != next)
         {
             LyricsFolderChanged?.Invoke();
@@ -42,14 +43,14 @@ internal sealed class MusicProvider : IIslandProvider
             SingleReader = true, FullMode = BoundedChannelFullMode.DropWrite
         });
         int readMetadata = 1;
-        int watchNeteaseClock = 0;
+        int pollPlaybackOrLyrics = 0;
         void Signal() => changes.Writer.TryWrite(true);
         using var clockStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         async Task WakeClockAsync()
         {
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(400));
             while (await timer.WaitForNextTickAsync(clockStop.Token))
-                if (Volatile.Read(ref watchNeteaseClock) != 0) Signal();
+                if (Volatile.Read(ref pollPlaybackOrLyrics) != 0) Signal();
         }
         var clockWorker = WakeClockAsync();
         NeteaseClock? neteaseClock = null;
@@ -76,6 +77,7 @@ internal sealed class MusicProvider : IIslandProvider
         }
         string title = "";
         string artist = "";
+        string album = "";
         ReadOnlyMemory<byte> artwork = default;
         IReadOnlyList<LyricLine> lyrics = [];
         string? localLyricsKey = null;
@@ -126,7 +128,7 @@ internal sealed class MusicProvider : IIslandProvider
                 }
                 if (session is null)
                 {
-                    Volatile.Write(ref watchNeteaseClock, 0);
+                    Volatile.Write(ref pollPlaybackOrLyrics, 0);
                     neteaseClock = null;
                     await publisher.PublishAsync(Status("暂无播放会话"), cancellationToken);
                     continue;
@@ -136,6 +138,7 @@ internal sealed class MusicProvider : IIslandProvider
                     var metadata = await session.TryGetMediaPropertiesAsync().AsTask(cancellationToken);
                     title = string.IsNullOrWhiteSpace(metadata?.Title) ? "未知曲目" : metadata.Title;
                     artist = metadata?.Artist ?? "";
+                    album = metadata?.AlbumTitle ?? "";
                     artwork = await LoadArtworkAsync(metadata?.Thumbnail, cancellationToken);
                     player = IdentifyPlayer(session.SourceAppUserModelId);
                     subtitle = metadata?.Subtitle;
@@ -172,10 +175,11 @@ internal sealed class MusicProvider : IIslandProvider
                     localLyricsKey = localKey;
                 }
                 bool retryLookup = false;
-                if (options.Online && netease && lyrics.Count == 0)
+                if ((options.GeneralOnline || options.NeteaseOnline && netease) && lyrics.Count == 0)
                 {
                     var id = LocalLyrics.GetNeteaseId(trackMetadata);
-                    var key = id is null ? $"{title}\n{artist}\n{Math.Round(duration.TotalSeconds)}" : $"id:{id}";
+                    var trackKey = id is null ? $"{title}\n{artist}\n{album}\n{Math.Round(duration.TotalSeconds)}" : $"id:{id}";
+                    var key = $"{options.NeteaseOnline}:{options.GeneralOnline}:{trackKey}";
                     if (requestKey != key)
                     {
                         CancelLyrics();
@@ -189,7 +193,7 @@ internal sealed class MusicProvider : IIslandProvider
                         lyricCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                         lookupStarted = Environment.TickCount64;
                         lookupAttempts++;
-                        pendingLyrics = _neteaseLyrics.FindAsync(title, artist, trackMetadata, duration, lyricCancellation.Token);
+                        pendingLyrics = FindOnlineLyricsAsync(options, netease, title, artist, album, trackMetadata, duration, lyricCancellation.Token);
                         _ = pendingLyrics.ContinueWith(_ => Signal(), TaskScheduler.Default);
                     }
                 }
@@ -197,8 +201,8 @@ internal sealed class MusicProvider : IIslandProvider
                 {
                     CancelLyrics();
                 }
-                Volatile.Write(ref watchNeteaseClock, netease &&
-                    (!hasTimeline || useLocalClock || retryLookup || playingHint == true && position <= TimeSpan.Zero) ? 1 : 0);
+                Volatile.Write(ref pollPlaybackOrLyrics, retryLookup || netease &&
+                    (!hasTimeline || useLocalClock || playingHint == true && position <= TimeSpan.Zero) ? 1 : 0);
                 var activeLyrics = pendingLyrics is { IsCompletedSuccessfully: true } lookup && lyrics.Count == 0
                     ? lookup.Result : lyrics;
                 bool playing = capability.PlaybackStatus == PlaybackStatus.Playing ||
@@ -232,6 +236,21 @@ internal sealed class MusicProvider : IIslandProvider
     }
 
     public static IslandEvent Status(string title) => new(SourceId, IslandEventType.Media, title);
+
+    private async Task<IReadOnlyList<LyricLine>> FindOnlineLyricsAsync(LyricsOptions options, bool netease,
+        string title, string artist, string album, string? metadata, TimeSpan duration, CancellationToken token)
+    {
+        if (netease)
+        {
+            var native = await _neteaseLyrics.FindAsync(title, artist, metadata, duration, token);
+            if (native.Count > 0 || !options.GeneralOnline) return native;
+        }
+        token.ThrowIfCancellationRequested();
+        var synced = await _lrcLibLyrics.FindAsync(title, artist, album, duration, token);
+        if (synced.Count > 0 || netease || duration <= TimeSpan.Zero) return synced;
+        token.ThrowIfCancellationRequested();
+        return await _neteaseLyrics.FindByTrackAsync(title, artist, duration, token);
+    }
 
     internal static string? IdentifyPlayer(string source)
     {

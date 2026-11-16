@@ -153,7 +153,7 @@ public partial class App : Application
     private void ApplyPreferences(IslandPreferences preferences)
     {
         _preferences = preferences;
-        _musicProvider.SetLyricsOptions(preferences.LyricsFolder, preferences.NeteaseOnlineLyrics);
+        _musicProvider.SetLyricsOptions(preferences.LyricsFolder, preferences.NeteaseOnlineLyrics, preferences.GeneralOnlineLyrics);
         if (MainWindow is IslandWindow island)
         {
             island.ApplyPreferences(preferences);

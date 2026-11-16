@@ -524,8 +524,9 @@ internal sealed class ExpandedTabs : DockPanel
         else
         {
             _previousLyric.Text = _nextLyric.Text = "";
-            _lyric.Text = _media?.Player == "网易云音乐" && !_preferences.NeteaseOnlineLyrics
-                ? "可在设置中启用网易云自动获取歌词" : "暂无同步歌词";
+            _lyric.Text = _media is not null && !_preferences.GeneralOnlineLyrics &&
+                !(_media.Player == "网易云音乐" && _preferences.NeteaseOnlineLyrics)
+                ? "可在设置中启用自动获取歌词" : "暂无同步歌词";
         }
     }
 

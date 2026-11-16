@@ -183,6 +183,9 @@ internal sealed class GeneralSettings : ScrollViewer
         var autoLyrics = Check(settings.NeteaseOnlineLyrics);
         autoLyrics.ToolTip = "直连网易云音乐。优先发送歌曲 ID，必要时用歌名和歌手搜索。";
         display.Children.Add(SettingsRows.Row("网易云自动获取歌词（联网）", autoLyrics));
+        var generalLyrics = Check(settings.GeneralOnlineLyrics);
+        generalLyrics.ToolTip = "向 LRCLIB 和网易云查询曲名、歌手及匹配所需的曲目信息。";
+        display.Children.Add(SettingsRows.Row("跨播放器自动获取歌词（联网）", generalLyrics));
 
         SettingsRows.Section(expanded, "显示的页面（可拖动排序）");
         var pageList = new StackPanel();
@@ -310,7 +313,7 @@ internal sealed class GeneralSettings : ScrollViewer
         };
 
         foreach (var toggle in contentOptions.Values.Select(option => option.Toggle).Concat(pageToggles.Values)
-            .Concat(new[] { oled, minimal, autoWidth, cover, rhythm, autoLyrics, rightClick, taskbar,
+            .Concat(new[] { oled, minimal, autoWidth, cover, rhythm, autoLyrics, generalLyrics, rightClick, taskbar,
                 topmost, fullscreen, maximized, quotaWarnings, ringInitial }))
         {
             toggle.Checked += (_, _) => QueueApply();
@@ -356,6 +359,7 @@ internal sealed class GeneralSettings : ScrollViewer
                 AvoidApps = avoidApps,
                 Use24HourClock = clock.SelectedIndex == 1,
                 LyricsFolder = lyrics, NeteaseOnlineLyrics = autoLyrics.IsChecked == true,
+                GeneralOnlineLyrics = generalLyrics.IsChecked == true,
                 Pages = pages.Select(page => new PagePreference(page, pageToggles[page].IsChecked == true)).ToArray(), NotchOrder = notchOrder.ToArray()
             };
             apply(next);
