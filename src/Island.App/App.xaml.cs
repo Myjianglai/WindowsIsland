@@ -1,0 +1,163 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Security.Principal;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Interop;
+using Island.App.Persistence;
+using Island.App.Presentation;
+using Island.App.Providers;
+using Island.App.UI;
+using Island.Core.Events;
+using Forms = System.Windows.Forms;
+
+namespace Island.App;
+
+public partial class App : Application
+{
+    private readonly IslandEventBus _events = new();
+    private readonly CancellationTokenSource _shutdown = new();
+    private readonly SettingsStore _store = new();
+    private readonly QuotaAccountStore _quotaAccounts = new();
+    private readonly QuotaProvider _quotas;
+    private Forms.NotifyIcon? _tray;
+    private SettingsWindow? _settings;
+    private ProviderHost? _music;
+    private ProviderHost? _clipboard;
+    private ProviderHost? _systemMonitor;
+    private ProviderHost? _deviceBattery;
+    private Mutex? _instance;
+    private IslandPreferences _preferences = IslandPreferences.Load();
+    private readonly MusicProvider _musicProvider = new();
+
+    public App() => _quotas = new QuotaProvider(_quotaAccounts);
+
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+        using var identity = WindowsIdentity.GetCurrent();
+        _instance = new Mutex(false, $@"Local\WindowsIsland.{identity.User?.Value}", out bool firstInstance);
+        if (!firstInstance)
+        {
+            Shutdown();
+            return;
+        }
+        var window = new IslandWindow(OpenSettings, _quotas.Refresh);
+        window.DockChanged += preferences =>
+        {
+            ApplyPreferences(preferences);
+            try { preferences.Save(); }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { }
+        };
+        var presenter = new IslandPresenter(window);
+        MainWindow = window;
+
+        var menu = new Forms.ContextMenuStrip();
+        menu.Items.Add("设置", null, (_, _) => OpenSettings());
+        menu.Items.Add("刷新 AI 额度", null, (_, _) => _quotas.Refresh());
+        menu.Items.Add("演示通知", null, (_, _) =>
+        {
+            _events.TryPublish(new IslandEvent("demo", IslandEventType.Notification,
+                "第一条通知", "横幅会自动收起", timeout: TimeSpan.FromSeconds(3)));
+            _events.TryPublish(new IslandEvent("demo", IslandEventType.Notification,
+                "第二条通知", "上一条收起后显示", timeout: TimeSpan.FromSeconds(3)));
+        });
+        menu.Items.Add("重置位置", null, (_, _) => window.ResetPosition());
+        menu.Items.Add("退出", null, (_, _) => Shutdown());
+        _tray = new Forms.NotifyIcon
+        {
+            ContextMenuStrip = menu,
+            Icon = SystemIcons.Application,
+            Text = "Windows 灵动岛",
+            Visible = true
+        };
+        _tray.DoubleClick += (_, _) => OpenSettings();
+        window.Show();
+        ApplyPreferences(_preferences);
+        _music = new ProviderHost(_musicProvider, _events,
+            () => MusicProvider.Status("请在设置中启用音乐"),
+            () => MusicProvider.Status("无法连接 Windows 播放会话"), _shutdown.Token);
+        var hwnd = new WindowInteropHelper(window).Handle;
+        _clipboard = new ProviderHost(new ClipboardProvider(HwndSource.FromHwnd(hwnd)), _events,
+            () => new IslandEvent(ClipboardProvider.SourceId, IslandEventType.Clipboard, "请在设置中启用剪贴板"),
+            () => new IslandEvent(ClipboardProvider.SourceId, IslandEventType.Clipboard, "无法连接系统剪贴板"),
+            _shutdown.Token);
+        _systemMonitor = new ProviderHost(new SystemMonitorProvider(), _events,
+            () => new IslandEvent(SystemMonitorProvider.SourceId, IslandEventType.SystemMetrics, "系统监控已关闭"),
+            () => new IslandEvent(SystemMonitorProvider.SourceId, IslandEventType.SystemMetrics, "无法读取系统监控"), _shutdown.Token);
+        _deviceBattery = new ProviderHost(new DeviceBatteryProvider(Dispatcher), _events,
+            () => new IslandEvent(DeviceBatteryProvider.SourceId, IslandEventType.DeviceBattery, "请在设置中启用设备电量"),
+            () => new IslandEvent(DeviceBatteryProvider.SourceId, IslandEventType.DeviceBattery, "无法读取设备电量"), _shutdown.Token);
+
+        try
+        {
+            var quotaHost = new ProviderHost(_quotas, _events,
+                () => new IslandEvent(QuotaProvider.SourceId, IslandEventType.Quota, "AI 额度"),
+                () => new IslandEvent(QuotaProvider.SourceId, IslandEventType.Quota, "无法启动额度数据源"), _shutdown.Token);
+            await Task.WhenAll(presenter.RunAsync(_events, _shutdown.Token),
+                ApplySourcesAsync(_store.LoadSources()), quotaHost.SetEnabledAsync(true));
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            // 正常退出，停止横幅调度。
+        }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _shutdown.Cancel();
+        _events.Complete();
+        if (_tray is not null)
+        {
+            _tray.Visible = false;
+            _tray.ContextMenuStrip?.Dispose();
+            _tray.Dispose();
+        }
+        _shutdown.Dispose();
+        _instance?.Dispose();
+        base.OnExit(e);
+    }
+
+    private void OpenSettings()
+    {
+        if (_settings is null)
+        {
+            _settings = new SettingsWindow(_store, ApplySourcesAsync, _quotaAccounts, _quotas.Refresh,
+                _preferences, ApplyPreferences, _quotas.MetricsFor);
+            _settings.Closed += (_, _) => _settings = null;
+            _settings.Show();
+        }
+        _settings.Activate();
+    }
+
+    private void ApplyPreferences(IslandPreferences preferences)
+    {
+        _preferences = preferences;
+        _musicProvider.SetLyricsOptions(preferences.LyricsFolder, preferences.NeteaseOnlineLyrics);
+        if (MainWindow is IslandWindow island)
+        {
+            island.ApplyPreferences(preferences);
+        }
+    }
+
+    private async Task ApplySourcesAsync(Dictionary<string, bool> sources)
+    {
+        if (_music is not null && _clipboard is not null && _systemMonitor is not null && _deviceBattery is not null)
+        {
+            try
+            {
+                await Task.WhenAll(
+                    _music.SetEnabledAsync(sources.GetValueOrDefault(MusicProvider.SourceId)),
+                    _clipboard.SetEnabledAsync(sources.GetValueOrDefault(ClipboardProvider.SourceId)),
+                    _systemMonitor.SetEnabledAsync(sources.GetValueOrDefault(SystemMonitorProvider.SourceId)),
+                    _deviceBattery.SetEnabledAsync(sources.GetValueOrDefault(DeviceBatteryProvider.SourceId, true)));
+            }
+            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+            {
+                // 应用正在退出。
+            }
+        }
+    }
+}
