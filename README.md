@@ -86,10 +86,16 @@ dotnet run --project src/Island.App/Island.App.csproj
 
 在 Claude Code 完成一次请求后，脚本默认会写入 `%LOCALAPPDATA%\WindowsIsland\claude-status.json`，账号设置里的状态文件路径留空即可。多账号可为各自的 Claude Code 环境设置不同的 `-OutputPath`，再在管理页填写对应路径。
 
-发布 Windows x64 自包含单文件，可在项目根目录运行以下命令。
+## 下载与更新
+
+从 [GitHub 发布页](https://github.com/Myjianglai/WindowsIsland/releases) 下载 Windows x64 版 `Island.exe`，双击运行。私有仓库需要有访问权限的 GitHub 账号。
+
+在「设置 → 版本与更新」中手动检查。应用用 Git Credential Manager 中已有的 GitHub 授权查询最新正式版，发现更新后可在浏览器下载。退出旧程序后再替换 EXE。
+
+发布时更新 `src/Island.App/Island.App.csproj` 的 `Version`，提交并打上对应的 `v主版本.次版本.修订版本` 标签。推送提交和标签后，在该标签的 GitHub Release 中上传下列命令生成的 `Island.exe`。
 
 ```powershell
-dotnet publish src/Island.App/Island.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None
+dotnet publish src/Island.App/Island.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None -o src/Island.App/bin/releases
 ```
 
 ## 事件交付
@@ -107,4 +113,4 @@ dotnet publish src/Island.App/Island.App.csproj -c Release -r win-x64 --self-con
 
 应用数据在本机处理及保存。邮箱和微软待办需要联网，后续设计为用户启用后直连所配置的 IMAP 服务或 Microsoft Graph。勾选完成会向 Graph 写入该待办的完成状态。
 
-收起形态参考 BrimDeck。系统读数旁的闪电图形来自 BrimDeck 的 `PowerIcons.cs`，按 Apache-2.0 使用。许可证可在「设置 → 第三方许可」阅读。[BrimDeck](https://github.com/MoFeng2223/BrimDeck)
+收起形态和网易云日志格式参考 BrimDeck。系统读数旁的闪电图形来自 BrimDeck 的 `PowerIcons.cs`，按 Apache-2.0 使用。[BrimDeck](https://github.com/MoFeng2223/BrimDeck) · [许可证](src/Island.App/Licenses/BrimDeck-Apache-2.0.txt)

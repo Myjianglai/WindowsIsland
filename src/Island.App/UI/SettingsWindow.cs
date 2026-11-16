@@ -102,20 +102,6 @@ internal sealed class SettingsWindow : Window
             }
         };
         content.Children.Add(save);
-        var licenses = new Button { Content = "第三方许可", HorizontalAlignment = HorizontalAlignment.Left,
-            Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 9, 0, 0) };
-        licenses.Click += (_, _) =>
-        {
-            using var reader = new StreamReader(typeof(SettingsWindow).Assembly.GetManifestResourceStream("Island.BrimDeckLicense")!);
-            var text = new TextBox
-            {
-                IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Margin = new Thickness(12), Text = "闪电图形和网易云日志格式参考 BrimDeck / MoFeng2223\n" +
-                    "https://github.com/MoFeng2223/BrimDeck\n\n" + reader.ReadToEnd()
-            };
-            new Window { Title = "第三方许可", Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Width = 620, Height = 500, Content = text }.ShowDialog();
-        };
         content.Children.Add(status);
         var general = new GeneralSettings(preferences, applyPreferences);
         var sidebar = new StackPanel { Margin = new Thickness(10, 24, 10, 16) };
@@ -166,7 +152,7 @@ internal sealed class SettingsWindow : Window
         AddPage("数据源", "\uE90F", new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         AddPage("AI 额度", "\uE9D9", new QuotaSettingsPanel(quotaAccounts, refreshQuotas, metricsFor));
         Category("关于");
-        AddPage("第三方许可", "\uE946", new StackPanel { Children = { SettingsRows.Row("开源组件许可证", licenses) } });
+        AddPage("版本与更新", "\uE895", new ReleaseSettings());
         var rail = new Border { Width = 192, BorderBrush = SettingsRows.Rule, BorderThickness = new Thickness(0, 0, 1, 0),
             Background = SettingsRows.Brush("#EFF1F5"),
             Child = new ScrollViewer { Content = sidebar, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
