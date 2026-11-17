@@ -42,6 +42,7 @@ internal sealed class QuotaProvider(QuotaAccountStore store) : IIslandProvider
     public async Task RunAsync(IIslandEventPublisher publisher, CancellationToken cancellationToken)
     {
         var cache = new Dictionary<Guid, CachedResult>();
+        var balanceHistory = new QuotaBalanceHistory();
         int lastRefresh = Volatile.Read(ref _refreshVersion);
         string? lastFingerprint = null;
         while (!cancellationToken.IsCancellationRequested)
@@ -79,7 +80,7 @@ internal sealed class QuotaProvider(QuotaAccountStore store) : IIslandProvider
                     _metrics[result.Account.Id] = metrics;
                 }
             }
-            var snapshot = new QuotaSnapshot(results.Select(result => result.Status).ToArray());
+            var snapshot = balanceHistory.AttachReference(new QuotaSnapshot(results.Select(result => result.Status).ToArray()));
             var fingerprint = JsonSerializer.Serialize(snapshot);
             if (fingerprint != lastFingerprint)
             {
@@ -164,6 +165,7 @@ internal sealed class QuotaProvider(QuotaAccountStore store) : IIslandProvider
     internal static QuotaAccountStatus ParseDeepSeek(QuotaAccount account, JsonElement root)
     {
         var details = new List<string>();
+        var balances = new List<QuotaBalance>();
         string? brief = null;
         foreach (var balance in root.GetProperty("balance_infos").EnumerateArray())
         {
@@ -172,13 +174,21 @@ internal sealed class QuotaProvider(QuotaAccountStore store) : IIslandProvider
             var toppedUp = balance.GetProperty("topped_up_balance").GetString();
             var granted = balance.GetProperty("granted_balance").GetString();
             brief ??= $"{currency} {total}";
-            details.Add($"{currency} {total}  ·  充值 {toppedUp}  ·  赠送 {granted}");
+            if (!string.IsNullOrWhiteSpace(currency) &&
+                decimal.TryParse(total, NumberStyles.Number, CultureInfo.InvariantCulture, out var amount))
+            {
+                balances.Add(new QuotaBalance(currency, amount));
+                details.Add($"{currency} · 充值余额 {toppedUp} · 赠送余额 {granted}");
+            }
+            else
+                details.Add($"{currency} {total} · 充值余额 {toppedUp} · 赠送余额 {granted}");
         }
         if (root.TryGetProperty("is_available", out var available) && available.ValueKind == JsonValueKind.False)
         {
             details.Add("余额不足以调用 API");
         }
-        return brief is null ? Status(account, "未知", "余额未知") : Status(account, brief, details.ToArray());
+        return brief is null ? Status(account, "未知", "余额未知") :
+            Status(account, brief, details.ToArray()) with { Balances = balances.ToArray() };
     }
 
     internal static QuotaAccountStatus WindowStatus(QuotaAccount account, List<QuotaMetric> windows, List<string> details)

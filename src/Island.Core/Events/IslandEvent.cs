@@ -31,9 +31,14 @@ public sealed record ClipboardPreview(string Preview, bool IsPinned, IslandActio
 public sealed record ClipboardSnapshot(IReadOnlyList<ClipboardPreview> Entries, IslandAction Clear);
 
 public sealed record QuotaMetric(string Key, string Label, double? Used, DateTimeOffset? Reset);
+public sealed record QuotaBalance(string Currency, decimal Amount, decimal Reference = 0)
+{
+    public double RemainingPercent => Reference > 0 ? (double)(Math.Clamp(Amount, 0, Reference) / Reference * 100) : 0;
+}
 public sealed record QuotaAccountStatus(
     string Service, string Name, string Color, bool Pinned, string Summary, IReadOnlyList<string> Details,
-    IReadOnlyList<QuotaMetric>? Metrics = null, IReadOnlyList<string>? RingKeys = null, Guid Id = default);
+    IReadOnlyList<QuotaMetric>? Metrics = null, IReadOnlyList<string>? RingKeys = null, Guid Id = default,
+    IReadOnlyList<QuotaBalance>? Balances = null);
 public sealed record QuotaSnapshot(IReadOnlyList<QuotaAccountStatus> Accounts);
 public sealed record ProcessMetric(string Name, double? Cpu, long MemoryBytes);
 public sealed record SystemMetrics(double? Cpu, uint? Memory, double? Download, double? Upload,

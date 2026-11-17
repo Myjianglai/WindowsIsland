@@ -375,23 +375,20 @@ internal sealed class ExpandedTabs : DockPanel
                 metric.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Children = { amount, unit } });
                 column.Children.Add(metric);
                 if (value is { } known)
-                {
-                    if (_preferences.ExpandedQuotaChart == QuotaChartStyle.Ring)
-                    {
-                        var ring = QuotaDisplay.MetricRing(known, account.Color, QuotaDisplay.Describe(value, _preferences.ShowRemaining));
-                        ring.Margin = new Thickness(0, 1, 8, 0);
-                        DockPanel.SetDock(ring, Dock.Left);
-                        metric.Children.Insert(0, ring);
-                    }
-                    else
-                    {
-                        var bar = new ProgressBar { Height = 5, Maximum = 100, Value = Math.Clamp(known, 0, 100), BorderThickness = new Thickness(0) };
-                        bar.SetResourceReference(StyleProperty, "QuotaProgress");
-                        bar.SetResourceReference(ProgressBar.ForegroundProperty, IslandTheme.Account(account.Color));
-                        bar.SetResourceReference(ProgressBar.BackgroundProperty, IslandTheme.Edge);
-                        column.Children.Add(bar);
-                    }
-                }
+                    AddQuotaChart(column, metric, known, account.Color, QuotaDisplay.Describe(value, _preferences.ShowRemaining));
+                columns.Children.Add(column);
+            }
+            foreach (var balance in account.Balances ?? [])
+            {
+                var column = new StackPanel { Margin = new Thickness(0, 0, 22, 12) };
+                column.Children.Add(Label($"{balance.Currency} API 余额", 13, Muted));
+                var amount = Label($"{balance.Amount:0.00####}", 25);
+                amount.FontWeight = FontWeights.SemiBold;
+                var metric = new DockPanel { Margin = new Thickness(0, 4, 0, 5), Children = { amount } };
+                column.Children.Add(metric);
+                AddQuotaChart(column, metric, balance.RemainingPercent, account.Color,
+                    $"{balance.Currency} {balance.Amount:0.00####} / {balance.Reference:0.00####}");
+                column.Children.Add(Label($"本机最高记录 {balance.Reference:0.00####} {balance.Currency}", 11, Muted));
                 columns.Children.Add(column);
             }
             if (columns.Children.Count > 0) rows.Children.Add(columns);
@@ -402,6 +399,24 @@ internal sealed class ExpandedTabs : DockPanel
             rows.Children.Add(divider);
         }
         _quotas.Children.Add(Scrollable(rows, 210));
+    }
+
+    private void AddQuotaChart(StackPanel column, DockPanel metric, double value, string color, string description)
+    {
+        if (_preferences.ExpandedQuotaChart == QuotaChartStyle.Ring)
+        {
+            var ring = QuotaDisplay.MetricRing(value, color, description);
+            ring.Margin = new Thickness(0, 1, 8, 0);
+            DockPanel.SetDock(ring, Dock.Left);
+            metric.Children.Insert(0, ring);
+            return;
+        }
+        var bar = new ProgressBar { Height = 5, Maximum = 100, Value = Math.Clamp(value, 0, 100),
+            BorderThickness = new Thickness(0), ToolTip = description };
+        bar.SetResourceReference(StyleProperty, "QuotaProgress");
+        bar.SetResourceReference(ProgressBar.ForegroundProperty, IslandTheme.Account(color));
+        bar.SetResourceReference(ProgressBar.BackgroundProperty, IslandTheme.Edge);
+        column.Children.Add(bar);
     }
 
     private static string ResetText(DateTimeOffset? reset)

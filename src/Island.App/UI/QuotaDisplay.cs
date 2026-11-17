@@ -43,8 +43,7 @@ internal static class QuotaDisplay
             var text = ExpandedTabs.Label(label, 10, IslandTheme.Account(account.Color));
             text.Margin = new Thickness(4, 0, 4, 0);
             text.VerticalAlignment = VerticalAlignment.Center;
-            text.MaxWidth = 72;
-            text.ToolTip = caption;
+            text.ToolTip = $"{caption} · {account.Summary}";
             return text;
         }
 
@@ -85,7 +84,14 @@ internal static class QuotaDisplay
             Canvas.SetTop(name, 10);
             circle.Children.Add(name);
         }
-        return circle;
+        if (string.Equals(account.Name, account.Service, StringComparison.OrdinalIgnoreCase)) return circle;
+        var title = ExpandedTabs.Label(account.Name, 11, IslandTheme.Account(account.Color));
+        title.VerticalAlignment = VerticalAlignment.Center;
+        title.Margin = new Thickness(2, 0, 6, 0);
+        return new StackPanel
+        {
+            Orientation = Orientation.Horizontal, ToolTip = circle.ToolTip, Children = { circle, title }
+        };
     }
 
     public static double? Value(double? used, bool remaining) => used is { } number
