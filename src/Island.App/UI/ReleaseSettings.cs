@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -18,7 +17,6 @@ namespace Island.App.UI;
 internal sealed class ReleaseSettings : StackPanel
 {
     private const string ReleasesPage = "https://github.com/Myjianglai/WindowsIsland-Releases/releases";
-    private const string ReleasesApi = "https://api.github.com/repos/Myjianglai/WindowsIsland-Releases/releases/latest";
     private static readonly Version Current = typeof(ReleaseSettings).Assembly.GetName().Version!;
     private static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false });
     private static readonly SemaphoreSlim InstallGate = new(1, 1);
@@ -118,59 +116,59 @@ internal sealed class ReleaseSettings : StackPanel
     private static async Task<(string Message, ReleaseAsset? Asset)> CheckAsync()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        using var request = new HttpRequestMessage(HttpMethod.Get, ReleasesApi);
-        request.Headers.UserAgent.ParseAdd("WindowsIsland/" + Current.ToString(3));
-        request.Headers.Accept.ParseAdd("application/vnd.github+json");
-        using var response = await Http.SendAsync(request, timeout.Token);
-        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
-            return ("GitHub 暂时限制了更新检查。可稍后重试或打开发布页。", null);
+        using var response = await OpenDownloadAsync($"{ReleasesPage}/latest/download/update.json", timeout.Token);
         response.EnsureSuccessStatusCode();
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token));
-        if (!document.RootElement.TryGetProperty("tag_name", out var tag) ||
-            tag.ValueKind != JsonValueKind.String ||
-            !Version.TryParse(tag.GetString()?.TrimStart('v', 'V'), out var latest))
-            return ("GitHub 发布标签无法识别。请打开发布页查看。", null);
-
-        if (latest <= Version.Parse(Current.ToString(3)))
+        var manifest = new byte[4097];
+        await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
+        int length = await source.ReadAtLeastAsync(manifest, manifest.Length, throwOnEndOfStream: false, timeout.Token);
+        if (length == manifest.Length) throw new InvalidDataException("Update manifest is too large.");
+        using var document = JsonDocument.Parse(manifest.AsMemory(0, length));
+        var asset = ReadAsset(document.RootElement);
+        if (asset is null) return ("无法解析发布版本。可打开发布页下载。", null);
+        if (asset.Version <= Version.Parse(Current.ToString(3)))
             return ($"当前已是最新版本 {Current.ToString(3)}。", null);
-
-        var asset = ReadAsset(document.RootElement, latest);
-        return asset is null ? ($"发现新版本 {latest}，可打开发布页下载。", null)
-            : ($"发现新版本 {latest}。", asset);
+        return ($"发现新版本 {asset.Version}。", asset);
     }
 
-    private static ReleaseAsset? ReadAsset(JsonElement root, Version version)
+    private static ReleaseAsset? ReadAsset(JsonElement manifest)
     {
-        if (!root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array) return null;
-        foreach (var item in assets.EnumerateArray())
-        {
-            if (item.GetProperty("name").GetString() != "Island.exe" || item.GetProperty("state").GetString() != "uploaded")
-                continue;
-            if (item.TryGetProperty("digest", out var digestValue) && digestValue.ValueKind == JsonValueKind.String &&
-                digestValue.GetString() is { Length: 71 } digest && digest.StartsWith("sha256:", StringComparison.Ordinal) &&
-                digest[7..].All(Uri.IsHexDigit) && item.GetProperty("size").TryGetInt64(out long length) &&
-                length is > 0 and <= 500_000_000)
-                return new ReleaseAsset(version, length, digest[7..]);
-        }
-        return null;
+        if (manifest.ValueKind != JsonValueKind.Object ||
+            !manifest.TryGetProperty("version", out var tag) || tag.ValueKind != JsonValueKind.String ||
+            !Version.TryParse(tag.GetString(), out var version) || version.Build < 0 || version.Revision >= 0 ||
+            !manifest.TryGetProperty("size", out var size) || size.ValueKind != JsonValueKind.Number ||
+            !size.TryGetInt64(out long length) || length is <= 0 or > 500_000_000 ||
+            !manifest.TryGetProperty("sha256", out var hash) || hash.ValueKind != JsonValueKind.String ||
+            hash.GetString() is not { Length: 64 } digest || !digest.All(Uri.IsHexDigit))
+            return null;
+        return new ReleaseAsset(version, length, digest);
     }
 
     private static async Task DownloadAsync(ReleaseAsset asset, string path, IProgress<int> progress,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{ReleasesPage}/download/v{asset.Version}/Island.exe");
-        request.Headers.UserAgent.ParseAdd("WindowsIsland/" + Current.ToString(3));
-        using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (response.StatusCode == HttpStatusCode.Found && response.Headers.Location is { IsAbsoluteUri: true } location &&
-            location.Scheme == Uri.UriSchemeHttps && location.Port == 443 && location.UserInfo.Length == 0 &&
-            location.Host is "release-assets.githubusercontent.com" or "objects.githubusercontent.com")
-        {
-            // 仅跟随 GitHub 附件服务的 HTTPS 下载地址。
-            using var download = await Http.GetAsync(location, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            await SaveAssetAsync(download, asset, path, progress, cancellationToken);
-            return;
-        }
+        using var response = await OpenDownloadAsync($"{ReleasesPage}/download/v{asset.Version}/Island.exe", cancellationToken);
         await SaveAssetAsync(response, asset, path, progress, cancellationToken);
+    }
+
+    private static async Task<HttpResponseMessage> OpenDownloadAsync(string url, CancellationToken cancellationToken)
+    {
+        var uri = new Uri(url);
+        for (int hop = 0; hop < 5; hop++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.UserAgent.ParseAdd("WindowsIsland/" + Current.ToString(3));
+            var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var redirect = (int)response.StatusCode is 301 or 302 or 303 or 307 or 308;
+            if (!redirect) return response;
+            var location = response.Headers.Location;
+            response.Dispose();
+            if (location is null) break;
+            uri = new Uri(uri, location);
+            if (uri.Scheme != Uri.UriSchemeHttps || uri.Port != 443 || uri.UserInfo.Length != 0 ||
+                uri.Host is not ("github.com" or "release-assets.githubusercontent.com" or "objects.githubusercontent.com"))
+                break;
+        }
+        throw new IOException("Unexpected release download redirect.");
     }
 
     private static async Task SaveAssetAsync(HttpResponseMessage response, ReleaseAsset asset, string path, IProgress<int> progress,

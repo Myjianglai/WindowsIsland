@@ -91,9 +91,9 @@ dotnet run --project src/Island.App/Island.App.csproj
 
 从 [公开下载页](https://github.com/Myjianglai/WindowsIsland-Releases/releases) 下载 Windows x64 版 `Island.exe`，双击运行。下载无需 GitHub 账号。
 
-在「设置 → 版本与更新」中检查最新版。自 v0.2.7 起，应用内下载不需要 GitHub 授权。选择「下载并重启安装」后，小岛会校验 SHA-256，再替换所在目录的 EXE。原目录需要有写入权限，也可以从浏览器下载并手动替换。
+在「设置 → 版本与更新」中检查最新版。自 v0.2.8 起，更新检查使用公开发布的 `update.json`，无需 GitHub 授权。选择「下载并重启安装」后，小岛会校验 SHA-256，再替换所在目录的 EXE。原目录需要有写入权限，也可以从浏览器下载并手动替换。
 
-发布时更新 `src/Island.App/Island.App.csproj` 的 `Version`，提交并打上对应的 `v主版本.次版本.修订版本` 标签。推送提交和标签后，在该标签的 GitHub Release 中上传下列命令生成的 `Island.exe`。
+发布时更新 `src/Island.App/Island.App.csproj` 的 `Version`，提交并打上对应的 `v主版本.次版本.修订版本` 标签。将生成的 `Island.exe` 和 `update.json` 上传到公开下载仓库的同名 Release。清单包含 `version`（不带 `v`）、`size`（字节数）和 `sha256`（十六进制摘要）。
 
 ```powershell
 dotnet publish src/Island.App/Island.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None -o src/Island.App/bin/releases
