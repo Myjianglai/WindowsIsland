@@ -22,6 +22,23 @@ internal static class PanelIcons
 
     public static Path Settings() => Draw("M7,2 H11 L12,5 L15,5 L17,8 L15,10 L15,13 L12,14 L11,17 H7 L6,14 L3,13 L3,10 L1,8 L3,5 H6 Z M11.5,9 A2.5,2.5 0 1 1 6.5,9 A2.5,2.5 0 1 1 11.5,9");
 
+    public static Path? Playback(string action)
+    {
+        string? data = action switch
+        {
+            "上一首" => "M0,8 L10,0 V16 Z M10,8 L20,0 V16 Z",
+            "下一首" => "M0,0 L10,8 L0,16 Z M10,0 L20,8 L10,16 Z",
+            "播放" => "M3,0 L17,8 L3,16 Z",
+            "暂停" => "M3,0 H8 V16 H3 Z M12,0 H17 V16 H12 Z",
+            _ => null
+        };
+        if (data is null) return null;
+        var icon = new Path { Data = Geometry.Parse(data), Width = 22, Height = 17, Stretch = Stretch.Uniform,
+            IsHitTestVisible = false };
+        icon.SetResourceReference(Shape.FillProperty, IslandTheme.Ink);
+        return icon;
+    }
+
     private static Path Draw(string data)
     {
         var icon = new Path

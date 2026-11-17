@@ -131,6 +131,7 @@ internal sealed class GeneralSettings : ScrollViewer
         var quotaChart = settings.ExpandedQuotaChart;
         var preview = new ComboBox { ItemsSource = new[] { "不显示文字", "歌名", "当前歌词" },
             SelectedIndex = settings.CompactMusic is MusicPreview.Track ? 1 : settings.CompactMusic is MusicPreview.Lyric ? 2 : 0 };
+        bool compactLyricsEnabled = settings.CompactLyrics;
         var cover = Check(settings.ShowMusicCover || settings.CompactMusic == MusicPreview.Cover);
         var rhythm = Check(settings.ShowMusicRhythm || settings.CompactMusic == MusicPreview.Rhythm);
         SettingsRows.Section(compactContent, "音乐预览");
@@ -313,6 +314,9 @@ internal sealed class GeneralSettings : ScrollViewer
                     index = monitors.Count - 1;
                 }
                 monitor.SelectedIndex = index;
+                compactMusic.IsChecked = next.ShowCompactMusic;
+                compactLyricsEnabled = next.CompactLyrics;
+                preview.SelectedIndex = next.CompactMusic switch { MusicPreview.Track => 1, MusicPreview.Lyric => 2, _ => 0 };
             }
             finally { syncingDock = false; }
         };
@@ -358,6 +362,7 @@ internal sealed class GeneralSettings : ScrollViewer
                 CompactMusic = preview.SelectedIndex switch { 1 => MusicPreview.Track, 2 => MusicPreview.Lyric, _ => MusicPreview.Off },
                 CompactQuotas = compactQuotas.IsChecked == true, CompactSystem = compactSystem.IsChecked == true,
                 ShowCompactMusic = compactMusic.IsChecked == true,
+                CompactLyrics = compactLyricsEnabled,
                 ExpandPage = startPage.SelectedIndex > 0 ? (IslandPage)(startPage.SelectedIndex - 1) : null,
                 RightClickSettings = rightClick.IsChecked == true, WheelAction = wheel,
                 PixelShift = oled.IsChecked == true, Minimal = minimal.IsChecked == true,

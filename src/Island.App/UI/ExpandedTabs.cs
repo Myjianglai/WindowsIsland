@@ -34,17 +34,19 @@ internal sealed class ExpandedTabs : DockPanel
     private readonly TextBlock _headerClock = Label("", 13, Muted);
     private readonly List<(TextBlock Label, DateTimeOffset? Reset)> _resets = [];
     private IslandPage[] _enabled = [];
-    private readonly TextBlock _title = Label("请在设置中启用音乐", 14);
+    private readonly TextBlock _title = Label("请在设置中启用音乐", 17);
     private readonly TextBlock _artist = Label("", 12, Muted);
-    private readonly Image _cover = new() { Width = 44, Height = 44, Stretch = Stretch.UniformToFill };
+    private readonly Image _cover = new() { Width = 54, Height = 54, Stretch = Stretch.UniformToFill };
     private readonly Slider _progress = new() { Height = 20, Maximum = 1, Focusable = false, ToolTip = "播放进度" };
     private readonly Slider _volume = new() { Height = 20, Maximum = 1, IsMoveToPointEnabled = true, Focusable = false, ToolTip = "系统音量" };
     private readonly TextBlock _volumeValue = Label("系统音量", 11, Muted);
     private readonly TextBlock _previousLyric = Label("", 13, Muted);
     private readonly TextBlock _lyric = Label("暂无同步歌词", 16);
     private readonly TextBlock _nextLyric = Label("", 13, Muted);
-    private readonly TextBlock _time = Label("", 11, Muted);
-    private readonly StackPanel _controls = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 5, 0, 0) };
+    private readonly TextBlock _time = Label("", 11);
+    private readonly TextBlock _remainingTime = Label("", 11, Muted);
+    private readonly Button _compactLyricButton = MakeFlatButton("歌词上岛");
+    private readonly StackPanel _controls = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private MediaSnapshot? _media;
     private IReadOnlyList<IslandAction> _mediaActions = [];
@@ -56,13 +58,14 @@ internal sealed class ExpandedTabs : DockPanel
     private bool _volumeDragging;
     private long _lastVolumeRead;
 
-    public bool IsEditing => _progress.IsMouseCaptureWithin || _volume.IsMouseCaptureWithin || _todo.IsEditing;
+    public bool IsEditing => IsMouseCaptureWithin || _todo.IsEditing;
     public bool IsEditingTodo => _todo.IsEditing;
     public event Action<bool> TodoEditingChanged
     {
         add => _todo.EditingChanged += value;
         remove => _todo.EditingChanged -= value;
     }
+    public event Action? CompactLyricsToggled;
     public event Action TodoItemsChanged
     {
         add => _todo.ItemsChanged += value;
@@ -147,41 +150,90 @@ internal sealed class ExpandedTabs : DockPanel
         _page.Margin = new Thickness(2, 9, 2, 0);
         Children.Add(_page);
 
+        _title.FontWeight = FontWeights.Bold;
         var artwork = new Border
         {
-            Width = 44, Height = 44, Child = _cover, CornerRadius = new CornerRadius(7),
-            Margin = new Thickness(0, 0, 9, 0)
+            Width = 54, Height = 54, Child = _cover, CornerRadius = new CornerRadius(12),
+            ClipToBounds = true, Margin = new Thickness(0, 0, 12, 0)
         };
         artwork.SetResourceReference(Border.BackgroundProperty, IslandTheme.Tile);
         DockPanel.SetDock(artwork, Dock.Left);
-        var transport = new StackPanel { Margin = new Thickness(0, 0, 17, 0) };
-        transport.Children.Add(new DockPanel
-        {
-            Children = { artwork, new StackPanel { Children = { _title, _artist } } }
-        });
-        var timeline = new DockPanel { Children = { _time, _progress } };
+        var trackInfo = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { _title, _artist } };
+        var transport = new StackPanel { Margin = new Thickness(0, 0, 15, 0) };
+        transport.Children.Add(new DockPanel { Children = { artwork, trackInfo } });
         _progress.SetResourceReference(StyleProperty, "IslandSlider");
+        _progress.Margin = new Thickness(0, 4, 0, 0);
         _volume.SetResourceReference(StyleProperty, "IslandSlider");
-        DockPanel.SetDock(_time, Dock.Right);
-        _time.Margin = new Thickness(8, 1, 0, 0);
-        timeline.Margin = new Thickness(0, 8, 0, 0);
-        transport.Children.Add(timeline);
-        transport.Children.Add(_controls);
-        var volume = new DockPanel { Margin = new Thickness(0, 4, 0, 1), Children = { _volumeValue, _volume } };
-        DockPanel.SetDock(_volumeValue, Dock.Right);
-        transport.Children.Add(volume);
-        _lyric.FontWeight = FontWeights.SemiBold;
-        _lyric.Margin = new Thickness(0, 12, 0, 12);
+        transport.Children.Add(_progress);
+        DockPanel.SetDock(_remainingTime, Dock.Right);
+        transport.Children.Add(new DockPanel { Children = { _remainingTime, _time } });
+
+        _lyric.FontWeight = FontWeights.Bold;
+        _lyric.TextWrapping = TextWrapping.Wrap;
+        _lyric.MaxHeight = 50;
+        _lyric.Margin = new Thickness(0, 5, 0, 5);
         var verses = new StackPanel { Children = { _previousLyric, _lyric, _nextLyric }, VerticalAlignment = VerticalAlignment.Center };
-        var lyrics = new Border { Padding = new Thickness(17, 6, 0, 6), BorderThickness = new Thickness(1, 0, 0, 0), Child = verses };
+        var lyrics = new Border { Padding = new Thickness(15, 0, 0, 0), BorderThickness = new Thickness(1, 0, 0, 0), Child = verses };
         lyrics.SetResourceReference(Border.BorderBrushProperty, IslandTheme.Edge);
-        var musicLayout = new Grid { Margin = new Thickness(4, 5, 4, 0) };
-        musicLayout.ColumnDefinitions.Add(new ColumnDefinition());
-        musicLayout.ColumnDefinitions.Add(new ColumnDefinition());
+
+        var musicLayout = new Grid { Margin = new Thickness(10, 5, 10, 0) };
+        musicLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(53, GridUnitType.Star) });
+        musicLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(47, GridUnitType.Star) });
         Grid.SetColumn(lyrics, 1);
         musicLayout.Children.Add(transport);
         musicLayout.Children.Add(lyrics);
         _music.Children.Add(musicLayout);
+
+        var lyricToggle = MakeFlatButton("词");
+        lyricToggle.FontSize = 17;
+        lyricToggle.ToolTip = "显示或隐藏右侧歌词";
+        void ShowLyrics(bool show)
+        {
+            lyrics.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            musicLayout.ColumnDefinitions[1].Width = show ? new GridLength(47, GridUnitType.Star) : new GridLength(0);
+            transport.Margin = show ? new Thickness(0, 0, 15, 0) : new Thickness(0);
+            lyricToggle.SetResourceReference(Control.ForegroundProperty, show ? IslandTheme.Ink : IslandTheme.Muted);
+            System.Windows.Automation.AutomationProperties.SetName(lyricToggle, show ? "隐藏右侧歌词" : "显示右侧歌词");
+        }
+        lyricToggle.Click += (_, _) => ShowLyrics(lyrics.Visibility != Visibility.Visible);
+        ShowLyrics(true);
+        _compactLyricButton.ToolTip = "在横向停靠的刘海或胶囊显示当前歌词";
+        _compactLyricButton.Click += (_, _) => CompactLyricsToggled?.Invoke();
+        var volumeButton = MakeFlatButton("");
+        volumeButton.FontFamily = new FontFamily("Segoe MDL2 Assets");
+        volumeButton.ToolTip = "系统音量";
+        System.Windows.Automation.AutomationProperties.SetName(volumeButton, "系统音量");
+        var volume = new DockPanel
+        {
+            Margin = new Thickness(0, 5, 10, 0), Width = 170, HorizontalAlignment = HorizontalAlignment.Right,
+            Visibility = Visibility.Collapsed, Children = { _volumeValue, _volume }
+        };
+        DockPanel.SetDock(_volumeValue, Dock.Right);
+        _volumeValue.Margin = new Thickness(8, 2, 0, 0);
+        volumeButton.Click += (_, _) => volume.Visibility = volume.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center, Children = { _compactLyricButton, volumeButton } };
+        var toolbar = new Grid { Margin = new Thickness(4, 8, 4, 0), MaxWidth = 460 };
+        toolbar.ColumnDefinitions.Add(new ColumnDefinition());
+        toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        toolbar.ColumnDefinitions.Add(new ColumnDefinition());
+        toolbar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        toolbar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        lyricToggle.HorizontalAlignment = HorizontalAlignment.Center;
+        Grid.SetColumn(_controls, 1);
+        Grid.SetColumn(actions, 2);
+        toolbar.Children.Add(lyricToggle);
+        toolbar.Children.Add(_controls);
+        toolbar.Children.Add(actions);
+        toolbar.SizeChanged += (_, e) =>
+        {
+            bool narrow = e.NewSize.Width < 350;
+            Grid.SetRow(actions, narrow ? 1 : 0);
+            Grid.SetColumn(actions, narrow ? 0 : 2);
+            Grid.SetColumnSpan(actions, narrow ? 3 : 1);
+        };
+        _music.Children.Add(toolbar);
+        _music.Children.Add(volume);
         _progress.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler((_, e) =>
         {
             if (e.ChangedButton != MouseButton.Left) return;
@@ -229,7 +281,7 @@ internal sealed class ExpandedTabs : DockPanel
         {
             if (_seeking is not { } playback || _progress.ActualWidth <= 0) return;
             _progress.Value = Math.Clamp(e.GetPosition(_progress).X / _progress.ActualWidth, 0, 1);
-            _time.Text = $"{FormatTime(TimeSpan.FromSeconds(_progress.Value * playback.Duration.TotalSeconds))} / {FormatTime(playback.Duration)}";
+            ShowTimes(TimeSpan.FromSeconds(_progress.Value * playback.Duration.TotalSeconds), playback.Duration);
         }
         _volume.PreviewMouseLeftButtonDown += (_, _) => _volumeDragging = true;
         _volume.AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler((_, e) =>
@@ -256,6 +308,9 @@ internal sealed class ExpandedTabs : DockPanel
             preferences.ExpandedQuotaChart != _preferences.ExpandedQuotaChart;
         _preferences = preferences;
         _devices.ApplyPreferences(preferences);
+        bool compactLyrics = preferences.CompactLyrics && preferences.CompactMusic == MusicPreview.Lyric && preferences.ShowCompactMusic;
+        _compactLyricButton.SetResourceReference(Control.ForegroundProperty, compactLyrics ? IslandTheme.Accent : IslandTheme.Ink);
+        System.Windows.Automation.AutomationProperties.SetName(_compactLyricButton, compactLyrics ? "关闭岛上歌词" : "开启岛上歌词");
         if (redrawQuotas) SetQuota(_quotaSnapshot);
         _navigation.Children.Clear();
         var enabled = preferences.Pages.Where(page => page.Enabled).ToArray();
@@ -484,8 +539,13 @@ internal sealed class ExpandedTabs : DockPanel
         {
             int slot = index;
             var action = _mediaActions[slot];
-            var symbol = action.Label switch { "上一首" => "⏮", "下一首" => "⏭", "播放" => "▶", "暂停" => "Ⅱ", _ => action.Label };
-            var button = MakeButton(symbol);
+            var button = MakeFlatButton(action.Label);
+            if (PanelIcons.Playback(action.Label) is { } icon)
+                button.Content = icon;
+            button.MinWidth = 42;
+            button.Height = 29;
+            button.Margin = new Thickness(2, 0, 2, 0);
+            button.Padding = new Thickness(6, 3, 6, 3);
             button.ToolTip = action.Label;
             System.Windows.Automation.AutomationProperties.SetName(button, action.Label);
             button.Click += async (_, _) =>
@@ -518,7 +578,7 @@ internal sealed class ExpandedTabs : DockPanel
     {
         var currentTime = DateTime.Now;
         var clockFormat = _preferences.Use24HourClock ? "HH:mm" : "h:mm tt";
-        if (_selectedPage == IslandPage.Todo)
+        if (_selectedPage is IslandPage.Todo or IslandPage.Music)
             clockFormat = _preferences.Use24HourClock ? "M月d日 ddd  HH:mm:ss" : "M月d日 ddd  h:mm:ss tt";
         _headerClock.Text = currentTime.ToString(clockFormat, CultureInfo.GetCultureInfo("zh-CN"));
         if (ReferenceEquals(_page.Child, _quotas))
@@ -547,7 +607,7 @@ internal sealed class ExpandedTabs : DockPanel
         if (_media is not { Duration.Ticks: > 0, HasPlaybackPosition: true } media)
         {
             _progress.Visibility = Visibility.Collapsed;
-            _time.Text = "";
+            _time.Text = _remainingTime.Text = "";
         }
         else
         {
@@ -559,7 +619,7 @@ internal sealed class ExpandedTabs : DockPanel
             if (_seeking is null)
             {
                 _progress.Value = position.TotalSeconds / media.Duration.TotalSeconds;
-                _time.Text = $"{FormatTime(position)} / {FormatTime(media.Duration)}";
+                ShowTimes(position, media.Duration);
             }
         }
         var lines = _media?.Lyrics;
@@ -583,6 +643,12 @@ internal sealed class ExpandedTabs : DockPanel
                 !(_media.Player == "网易云音乐" && _preferences.NeteaseOnlineLyrics)
                 ? "在设置 → 显示器与时钟中开启跨播放器自动获取歌词" : "暂无同步歌词";
         }
+    }
+
+    private void ShowTimes(TimeSpan position, TimeSpan duration)
+    {
+        _time.Text = FormatTime(position);
+        _remainingTime.Text = "-" + FormatTime(duration > position ? duration - position : TimeSpan.Zero);
     }
 
     private static TimeSpan PlaybackPosition(MediaSnapshot media)
@@ -618,7 +684,7 @@ internal sealed class ExpandedTabs : DockPanel
         }
     }
 
-    private static string FormatTime(TimeSpan value) => $"{(int)value.TotalMinutes}:{value.Seconds:00}";
+    private static string FormatTime(TimeSpan value) => $"{(int)value.TotalMinutes:00}:{value.Seconds:00}";
 
     internal static TextBlock Label(string text, double size, string color = IslandTheme.Ink)
     {
@@ -631,6 +697,13 @@ internal sealed class ExpandedTabs : DockPanel
     {
         var button = new Button { Content = text, Focusable = false, Margin = new Thickness(0, 0, 6, 0) };
         button.SetResourceReference(StyleProperty, "IslandButton");
+        return button;
+    }
+
+    internal static Button MakeFlatButton(string text)
+    {
+        var button = MakeButton(text);
+        button.SetResourceReference(StyleProperty, "IslandFlatButton");
         return button;
     }
 

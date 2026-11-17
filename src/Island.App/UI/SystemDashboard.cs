@@ -66,7 +66,10 @@ internal sealed class SystemDashboard : Grid
             Margin = new Thickness(0, 0, 0, 7), Children = { _cpuSort, _memorySort } };
         _cpuSort.Click += (_, _) => SortByMemory(false);
         _memorySort.Click += (_, _) => SortByMemory(true);
-        var right = new StackPanel { Children = { sort, _ranking } };
+        var scroll = new ScrollViewer { Content = _ranking, MaxHeight = 150,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        System.Windows.Automation.AutomationProperties.SetName(scroll, "系统进程列表");
+        var right = new StackPanel { Children = { sort, scroll } };
         SetColumn(right, 1);
         Children.Add(left);
         Children.Add(right);
@@ -129,7 +132,7 @@ internal sealed class SystemDashboard : Grid
         var entries = _latest?.Processes ?? [];
         var ranked = _byMemory ? entries.OrderByDescending(p => p.MemoryBytes)
             : entries.Where(p => p.Cpu.HasValue).OrderByDescending(p => p.Cpu);
-        foreach (var process in ranked.Take(6))
+        foreach (var process in ranked.Take(24))
         {
             var score = ExpandedTabs.Label(_byMemory ? Bytes(process.MemoryBytes) : $"{process.Cpu:0.#}%", 13);
             DockPanel.SetDock(score, Dock.Right);

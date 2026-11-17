@@ -108,6 +108,14 @@ internal sealed class IslandWindow : Window
         IslandTheme.Apply(Resources, _preferences.Skin);
 
         _tabs = new ExpandedTabs(openSettings, refreshQuota);
+        _tabs.CompactLyricsToggled += () =>
+        {
+            bool enabled = _preferences.ShowCompactMusic && _preferences.CompactLyrics && _preferences.CompactMusic == MusicPreview.Lyric;
+            DockChanged?.Invoke(_preferences with
+            {
+                ShowCompactMusic = true, CompactLyrics = true, CompactMusic = enabled ? MusicPreview.Track : MusicPreview.Lyric
+            });
+        };
         _tabs.TodoEditingChanged += SetTodoKeyboardFocus;
         _todoPreview = _tabs.GetTodoPreview(DateTimeOffset.Now);
         _tabs.TodoItemsChanged += () => UpdateTodoPreview(DateTimeOffset.Now);

@@ -1,23 +1,156 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style x:Key="IslandScrollPage" TargetType="RepeatButton">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RepeatButton">
+          <Border Background="Transparent" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="ScrollBar">
+    <Setter Property="Background" Value="{DynamicResource IslandEdge}" />
+    <Style.Triggers>
+      <Trigger Property="Orientation" Value="Vertical">
+        <Setter Property="Width" Value="11" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="ScrollBar">
+              <Grid x:Name="Rail" Background="Transparent" Margin="0,2,0,2">
+                <Border x:Name="Guide" Width="5" CornerRadius="2.5" Background="{DynamicResource IslandTile}"
+                        HorizontalAlignment="Center" Opacity="0" IsHitTestVisible="False" />
+                <Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="True">
+                  <Track.DecreaseRepeatButton>
+                    <RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource IslandScrollPage}" />
+                  </Track.DecreaseRepeatButton>
+                  <Track.IncreaseRepeatButton>
+                    <RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource IslandScrollPage}" />
+                  </Track.IncreaseRepeatButton>
+                  <Track.Thumb>
+                    <Thumb x:Name="Grip" Focusable="False" MinHeight="24" Background="{TemplateBinding Background}">
+                      <Thumb.Template>
+                        <ControlTemplate TargetType="Thumb">
+                          <Grid Background="Transparent">
+                            <Border x:Name="ThumbFace" Width="5" CornerRadius="2.5" HorizontalAlignment="Center"
+                                    Background="{TemplateBinding Background}" />
+                          </Grid>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsDragging" Value="True">
+                              <Setter TargetName="ThumbFace" Property="Width" Value="7" />
+                              <Setter TargetName="ThumbFace" Property="Background" Value="#2493FF" />
+                            </Trigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Thumb.Template>
+                    </Thumb>
+                  </Track.Thumb>
+                </Track>
+              </Grid>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Guide" Property="Opacity" Value="1" />
+                  <Setter TargetName="Grip" Property="Background" Value="#2493FF" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Trigger>
+    </Style.Triggers>
+  </Style>
   <Style x:Key="IslandButton" TargetType="Button">
     <Setter Property="Focusable" Value="False" />
     <Setter Property="Foreground" Value="{DynamicResource IslandInk}" />
     <Setter Property="Background" Value="{DynamicResource IslandTile}" />
     <Setter Property="Padding" Value="9,4" />
+    <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border x:Name="Face" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
-            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+          <Grid x:Name="Face">
+            <Border Background="{TemplateBinding Background}" CornerRadius="99" />
+            <Border x:Name="Tint" CornerRadius="99" Background="White" Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                               VerticalAlignment="Center" RecognizesAccessKey="True" />
-          </Border>
+          </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-              <Setter TargetName="Face" Property="Background" Value="{DynamicResource IslandEdge}" />
+              <Setter TargetName="Tint" Property="Opacity" Value="0.1" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Tint" Property="Opacity" Value="0.19" />
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Face" Property="Opacity" Value="0.45" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style x:Key="IslandCancelButton" TargetType="Button" BasedOn="{StaticResource IslandButton}">
+    <Setter Property="Background" Value="#543535" />
+    <Setter Property="Foreground" Value="#FFC1B9" />
+    <Setter Property="Padding" Value="14,4" />
+  </Style>
+  <Style x:Key="IslandConfirmButton" TargetType="Button" BasedOn="{StaticResource IslandButton}">
+    <Setter Property="Background" Value="#37373A" />
+    <Setter Property="Foreground" Value="White" />
+    <Setter Property="Padding" Value="14,4" />
+  </Style>
+  <Style x:Key="IslandFlatButton" TargetType="Button" BasedOn="{StaticResource IslandButton}">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="HitArea" Background="Transparent" Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="HitArea" Property="Opacity" Value="0.78" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="HitArea" Property="Opacity" Value="0.55" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="HitArea" Property="Opacity" Value="0.4" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style x:Key="TodoListRow" TargetType="Border">
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Background" Value="Transparent" />
+    <Style.Triggers>
+      <Trigger Property="IsMouseOver" Value="True">
+        <Setter Property="Background" Value="{DynamicResource IslandEdge}" />
+      </Trigger>
+    </Style.Triggers>
+  </Style>
+  <Style x:Key="TodoRepeatDay" TargetType="CheckBox">
+    <Setter Property="Width" Value="19" />
+    <Setter Property="Height" Value="19" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="CheckBox">
+          <Border x:Name="DayFace" Background="{DynamicResource IslandEdge}" CornerRadius="10" BorderThickness="1">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="DayFace" Property="Background" Value="#1171DC" />
+              <Setter Property="Foreground" Value="White" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="DayFace" Property="BorderBrush" Value="{DynamicResource IslandAccent}" />
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
