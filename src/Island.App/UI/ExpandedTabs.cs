@@ -37,7 +37,7 @@ internal sealed class ExpandedTabs : DockPanel
     private readonly TextBlock _title = Label("请在设置中启用音乐", 14);
     private readonly TextBlock _artist = Label("", 12, Muted);
     private readonly Image _cover = new() { Width = 44, Height = 44, Stretch = Stretch.UniformToFill };
-    private readonly Slider _progress = new() { Height = 20, Maximum = 1, IsMoveToPointEnabled = true, Focusable = false, ToolTip = "播放进度" };
+    private readonly Slider _progress = new() { Height = 20, Maximum = 1, Focusable = false, ToolTip = "播放进度" };
     private readonly Slider _volume = new() { Height = 20, Maximum = 1, IsMoveToPointEnabled = true, Focusable = false, ToolTip = "系统音量" };
     private readonly TextBlock _volumeValue = Label("系统音量", 11, Muted);
     private readonly TextBlock _previousLyric = Label("", 13, Muted);
@@ -182,15 +182,29 @@ internal sealed class ExpandedTabs : DockPanel
         musicLayout.Children.Add(transport);
         musicLayout.Children.Add(lyrics);
         _music.Children.Add(musicLayout);
-        _progress.PreviewMouseLeftButtonDown += (_, _) =>
+        _progress.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler((_, e) =>
         {
+            if (e.ChangedButton != MouseButton.Left) return;
+            if (_media is not { Seek: not null, Duration.Ticks: > 0 }) return;
+            if (!_progress.CaptureMouse()) return;
             _seeking = _media;
             _seekTrack = TrackLabel;
+            MovePlayhead(e);
+            e.Handled = true;
+        }), true);
+        _progress.PreviewMouseMove += (_, e) =>
+        {
+            if (_seeking is null || !_progress.IsMouseCaptured) return;
+            MovePlayhead(e);
+            e.Handled = true;
         };
         _progress.AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(async (_, e) =>
         {
             if (e.ChangedButton != MouseButton.Left || _seeking is not { } playback) return;
+            MovePlayhead(e);
             _seeking = null;
+            _progress.ReleaseMouseCapture();
+            e.Handled = true;
             if (_seekTrack != TrackLabel || _media is not { Seek: { } seek } current) return;
             var position = TimeSpan.FromSeconds(_progress.Value * playback.Duration.TotalSeconds);
             try
@@ -204,7 +218,18 @@ internal sealed class ExpandedTabs : DockPanel
             }
             catch (Exception) { _artist.Text = "播放器暂时无法调整进度"; }
         }), true);
-        _progress.LostMouseCapture += (_, _) => _seeking = null;
+        _progress.LostMouseCapture += (_, _) =>
+        {
+            if (_seeking is null) return;
+            _seeking = null;
+            UpdateProgress();
+        };
+        void MovePlayhead(MouseEventArgs e)
+        {
+            if (_seeking is not { } playback || _progress.ActualWidth <= 0) return;
+            _progress.Value = Math.Clamp(e.GetPosition(_progress).X / _progress.ActualWidth, 0, 1);
+            _time.Text = $"{FormatTime(TimeSpan.FromSeconds(_progress.Value * playback.Duration.TotalSeconds))} / {FormatTime(playback.Duration)}";
+        }
         _volume.PreviewMouseLeftButtonDown += (_, _) => _volumeDragging = true;
         _volume.AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler((_, e) =>
         {
@@ -528,11 +553,13 @@ internal sealed class ExpandedTabs : DockPanel
             var position = PlaybackPosition(media);
             _progress.Visibility = Visibility.Visible;
             _progress.IsEnabled = media.Seek is not null;
+            _progress.ToolTip = _progress.IsEnabled ? "点击或拖动调整播放进度" : "当前播放器未提供进度控制";
+            ToolTipService.SetShowOnDisabled(_progress, true);
             if (_seeking is null)
             {
                 _progress.Value = position.TotalSeconds / media.Duration.TotalSeconds;
+                _time.Text = $"{FormatTime(position)} / {FormatTime(media.Duration)}";
             }
-            _time.Text = $"{FormatTime(position)} / {FormatTime(media.Duration)}";
         }
         var lines = _media?.Lyrics;
         if (_media is { HasPlaybackPosition: true } && lines is { Count: > 0 })

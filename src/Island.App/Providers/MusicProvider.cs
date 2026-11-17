@@ -273,8 +273,8 @@ internal sealed class MusicProvider : IIslandProvider
                         duration, useLocalClock || timeline.LastUpdatedTime <= DateTimeOffset.UnixEpoch
                             ? DateTimeOffset.UtcNow : timeline.LastUpdatedTime, playing,
                         double.IsFinite(rate) ? rate : 1,
-                        capability.Controls.IsPlaybackPositionEnabled && timeline.EndTime > timeline.StartTime
-                            ? (position, token) => SeekAsync(active, position, token, cancellationToken) : null,
+                        capability.Controls.IsPlaybackPositionEnabled && duration > TimeSpan.Zero
+                            ? (position, token) => SeekAsync(active, position, duration, token, cancellationToken) : null,
                         activeLyrics, player, hasTimeline || useLocalClock);
                     await publisher.PublishAsync(new IslandEvent(Id, IslandEventType.Media, title, artist, "music",
                         BuildActions(session, capability.Controls, playing, cancellationToken, BeginSkipRecovery), media: snapshot),
@@ -339,7 +339,8 @@ internal sealed class MusicProvider : IIslandProvider
         return null;
     }
 
-    private static async ValueTask SeekAsync(Session session, TimeSpan position, CancellationToken token, CancellationToken lifetime)
+    private static async ValueTask SeekAsync(Session session, TimeSpan position, TimeSpan duration,
+        CancellationToken token, CancellationToken lifetime)
     {
         using var canceled = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime);
         canceled.Token.ThrowIfCancellationRequested();
@@ -349,7 +350,7 @@ internal sealed class MusicProvider : IIslandProvider
         if (max <= min)
         {
             min = timeline.StartTime;
-            max = timeline.EndTime;
+            max = timeline.EndTime > min ? timeline.EndTime : min + duration;
         }
         if (max <= min || !await session.TryChangePlaybackPositionAsync(
             Math.Clamp((timeline.StartTime + position).Ticks, min.Ticks, max.Ticks)).AsTask(canceled.Token))

@@ -54,7 +54,7 @@ dotnet run --project src/Island.App/Island.App.csproj
 - 把文件拖到小岛可加入「置物架」，点击打开，也可定位、拖出副本或移除条目。置物架只在本次运行中保存文件路径，移除条目不会删除原文件。
 - 系统监控每 2 秒采样 CPU、物理内存及网卡上下行速率。展开页左侧显示总 CPU、各逻辑处理器、内存、本次监控的累计流量和可用的系统电池读数。右侧可切换 CPU 或内存进程排行。收起的小岛保留精简读数。
 - 设备页默认自动刷新，优先读取 Windows 为已连接蓝牙设备提供的电量属性，再尝试 BLE 标准电池服务。Logi Bolt 和部分 Unifying 接收器通过 HID++ 获取设备电量。XInput 无线手柄可显示电量等级。有精确百分比时显示电量环，低电量变色，设备未报告时显示「未知」。
-- 待办清单页显示完成数，支持在岛内添加、勾选、编辑和删除。点条目旁的时钟可设置提醒时间和每周重复日。小岛运行时通过横幅提醒，记录加密保存在本机，重启后可继续查看。
+- 待办清单页支持添加、勾选、编辑、删除和通过 Excel（.xlsx）导入导出。导入时合并到现有清单并跳过重复项，自己制作导入表时第一行至少包含「标题」列。点条目旁的时钟可设置提醒时间和每周重复日。小岛运行时通过横幅提醒，记录加密保存在本机，重启后可继续查看。
 
 ## AI 额度
 
@@ -89,9 +89,9 @@ dotnet run --project src/Island.App/Island.App.csproj
 
 ## 下载与更新
 
-从 [GitHub 发布页](https://github.com/Myjianglai/WindowsIsland/releases) 下载 Windows x64 版 `Island.exe`，双击运行。私有仓库需要有访问权限的 GitHub 账号。
+从 [公开下载页](https://github.com/Myjianglai/WindowsIsland-Releases/releases) 下载 Windows x64 版 `Island.exe`，双击运行。下载无需 GitHub 账号。
 
-在「设置 → 版本与更新」中检查最新版。自 v0.2.6 起，可在应用内选择「下载并重启安装」。应用使用 Git Credential Manager 中已有的 GitHub 授权，校验 SHA-256 后替换所在目录的 EXE。原目录需要有写入权限，也可以从浏览器下载并手动替换。
+在「设置 → 版本与更新」中检查最新版。自 v0.2.7 起，应用内下载不需要 GitHub 授权。选择「下载并重启安装」后，小岛会校验 SHA-256，再替换所在目录的 EXE。原目录需要有写入权限，也可以从浏览器下载并手动替换。
 
 发布时更新 `src/Island.App/Island.App.csproj` 的 `Version`，提交并打上对应的 `v主版本.次版本.修订版本` 标签。推送提交和标签后，在该标签的 GitHub Release 中上传下列命令生成的 `Island.exe`。
 

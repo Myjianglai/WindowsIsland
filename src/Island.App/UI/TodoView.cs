@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -9,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Island.App.Persistence;
 using Island.Core.Events;
+using Microsoft.Win32;
 
 namespace Island.App.UI;
 
@@ -51,6 +54,12 @@ internal sealed class TodoView : Grid
         add.Click += (_, _) => OpenEditor(null, reminder: false);
         _edit.Click += (_, _) => { if (Selected() is { } item) OpenEditor(item, reminder: false); };
         left.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 17, 0, 0), Children = { add, _edit } });
+        var import = ExpandedTabs.MakeButton("导入 Excel");
+        var export = ExpandedTabs.MakeButton("导出 Excel");
+        import.Click += async (_, _) => await TransferExcelAsync(import: true);
+        export.Click += async (_, _) => await TransferExcelAsync(import: false);
+        left.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 7, 0, 0),
+            Children = { import, export } });
         _status.Margin = new Thickness(0, 8, 0, 0);
         left.Children.Add(_status);
         Children.Add(left);
@@ -59,6 +68,48 @@ internal sealed class TodoView : Grid
         SetColumn(_card, 1);
         Children.Add(_card);
         Render();
+    }
+
+    private async Task TransferExcelAsync(bool import)
+    {
+        if (IsEditing) return;
+        if (_store.ReadError is { } error)
+        {
+            _status.Text = error;
+            return;
+        }
+        const string filter = "Excel 工作簿 (*.xlsx)|*.xlsx";
+        SetEditing(true);
+        try
+        {
+            var owner = Window.GetWindow(this);
+            if (import)
+            {
+                var dialog = new OpenFileDialog { Title = "导入待办", Filter = filter, CheckFileExists = true };
+                if (dialog.ShowDialog(owner) != true) return;
+                var imported = await Task.Run(() => TodoSpreadsheet.Import(dialog.FileName));
+                var merged = TodoSpreadsheet.Merge(_store.Items, imported);
+                int added = merged.Length - _store.Items.Count;
+                if (added == 0 || Commit(merged))
+                    _status.Text = $"导入 {added} 项，跳过 {imported.Length - added} 项";
+            }
+            else
+            {
+                var dialog = new SaveFileDialog { Title = "导出待办", Filter = filter, DefaultExt = ".xlsx",
+                    AddExtension = true, FileName = "灵动岛待办.xlsx" };
+                if (dialog.ShowDialog(owner) != true) return;
+                var snapshot = _store.Items;
+                await Task.Run(() => TodoSpreadsheet.Export(dialog.FileName, snapshot));
+                _status.Text = $"已导出 {snapshot.Count} 项";
+            }
+        }
+        catch (InvalidDataException ex) { _status.Text = ex.Message; }
+        catch (Exception) { _status.Text = import ? "无法读取该 Excel 文件" : "无法保存 Excel 文件"; }
+        finally
+        {
+            SetEditing(false);
+            Render();
+        }
     }
 
     public void CheckReminders(DateTimeOffset now, Func<IslandEvent, bool> publish)
