@@ -13,6 +13,8 @@ namespace Island.App.UI;
 
 internal sealed class SettingsWindow : Window
 {
+    public event Action? ExitRequested;
+
     private readonly GeneralSettings _general;
     private readonly TextBlock _saveError = new() { Foreground = SettingsRows.Brush("#A42532"),
         TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10), Visibility = Visibility.Collapsed };
@@ -71,6 +73,9 @@ internal sealed class SettingsWindow : Window
             startupStatus.Text = "无法读取当前用户的启动项。";
         }
         var startupPage = new StackPanel { Children = { SettingsRows.Row("开机自动启动", startup), startupStatus } };
+        var exit = new Button { Content = "退出灵动岛" };
+        exit.Click += (_, _) => ExitRequested?.Invoke();
+        startupPage.Children.Add(SettingsRows.Row("关闭程序", exit));
         var sources = store.LoadSources();
         var toggles = new Dictionary<string, CheckBox>();
         foreach (var (id, label) in new (string, string)[]
@@ -173,7 +178,7 @@ internal sealed class SettingsWindow : Window
         });
         general.OpenBatterySettings += () => batteries.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Category("关于");
-        AddPage("版本与更新", "\uE895", new ReleaseSettings());
+        AddPage("版本与更新", "\uE895", new ReleaseSettings(() => ExitRequested?.Invoke()));
         var rail = new Border { Width = 192, BorderBrush = SettingsRows.Rule, BorderThickness = new Thickness(0, 0, 1, 0),
             Background = SettingsRows.Brush("#EFF1F5"),
             Child = new ScrollViewer { Content = sidebar, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };

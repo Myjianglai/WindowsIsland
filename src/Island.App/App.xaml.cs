@@ -45,6 +45,11 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (ReleaseInstaller.TryRun(e.Args))
+        {
+            Shutdown();
+            return;
+        }
         using var identity = WindowsIdentity.GetCurrent();
         _instance = new Mutex(false, $@"Local\WindowsIsland.{identity.User?.Value}", out bool firstInstance);
         if (!firstInstance)
@@ -84,6 +89,11 @@ public partial class App : Application
         };
         _tray.DoubleClick += (_, _) => OpenSettings();
         window.Show();
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(8));
+            ReleaseInstaller.Cleanup();
+        });
         ApplyPreferences(_preferences);
         _music = new ProviderHost(_musicProvider, _events,
             () => MusicProvider.Status("请在设置中启用音乐"),
@@ -137,6 +147,7 @@ public partial class App : Application
         {
             _settings = new SettingsWindow(_store, ApplySourcesAsync, _quotaAccounts, _quotas.Refresh,
                 _preferences, ChangePreferences, _quotas.MetricsFor);
+            _settings.ExitRequested += Shutdown;
             if (MainWindow is IslandWindow island)
             {
                 var settings = _settings;

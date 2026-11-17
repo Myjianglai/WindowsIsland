@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -44,13 +45,21 @@ internal sealed class MusicProvider : IIslandProvider
         });
         int readMetadata = 1;
         int pollPlaybackOrLyrics = 0;
+        long skipRecoveryUntil = 0;
+        long? unavailableSince = null;
+        bool recoveringRead = false;
         void Signal() => changes.Writer.TryWrite(true);
         using var clockStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         async Task WakeClockAsync()
         {
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(400));
             while (await timer.WaitForNextTickAsync(clockStop.Token))
-                if (Volatile.Read(ref pollPlaybackOrLyrics) != 0) Signal();
+            {
+                if (Environment.TickCount64 < Interlocked.Read(ref skipRecoveryUntil))
+                    SignalMetadata();
+                else if (Volatile.Read(ref pollPlaybackOrLyrics) != 0)
+                    Signal();
+            }
         }
         var clockWorker = WakeClockAsync();
         NeteaseClock? neteaseClock = null;
@@ -97,6 +106,21 @@ internal sealed class MusicProvider : IIslandProvider
             requestKey = null;
             lookupAttempts = 0;
         }
+        bool WaitForMedia()
+        {
+            var now = Environment.TickCount64;
+            unavailableSince ??= now;
+            if (now >= Interlocked.Read(ref skipRecoveryUntil) && now - unavailableSince.Value >= 2200) return false;
+            Volatile.Write(ref pollPlaybackOrLyrics, 1);
+            return true;
+        }
+
+        void BeginSkipRecovery()
+        {
+            Interlocked.Exchange(ref skipRecoveryUntil, Environment.TickCount64 + 4200);
+            SignalMetadata();
+        }
+
         try
         {
             LyricsFolderChanged += SignalMetadata;
@@ -105,121 +129,169 @@ internal sealed class MusicProvider : IIslandProvider
             Signal();
             await foreach (var change in changes.Reader.ReadAllAsync(cancellationToken))
             {
-                var current = manager.GetCurrentSession();
-                if (current is null || current.GetPlaybackInfo()?.PlaybackStatus != PlaybackStatus.Playing)
+                try
                 {
-                    current = manager.GetSessions()
-                        .Where(candidate => candidate.GetPlaybackInfo()?.PlaybackStatus == PlaybackStatus.Playing)
-                        .OrderByDescending(candidate => IdentifyPlayer(candidate.SourceAppUserModelId) is not null)
-                        .FirstOrDefault() ?? current;
-                }
-                if (!Equals(current, session))
-                {
-                    Unsubscribe();
-                    CancelLyrics();
-                    session = current;
-                    Interlocked.Exchange(ref readMetadata, 1);
-                    if (session is not null)
+                    var current = manager.GetCurrentSession();
+                    if (current is null || current.GetPlaybackInfo()?.PlaybackStatus != PlaybackStatus.Playing)
                     {
-                        session.MediaPropertiesChanged += OnMediaChanged;
-                        session.PlaybackInfoChanged += OnPlaybackChanged;
-                        session.TimelinePropertiesChanged += OnTimelineChanged;
+                        current = manager.GetSessions()
+                            .Where(candidate => candidate.GetPlaybackInfo()?.PlaybackStatus == PlaybackStatus.Playing)
+                            .OrderByDescending(candidate => IdentifyPlayer(candidate.SourceAppUserModelId) is not null)
+                            .FirstOrDefault() ?? current;
                     }
-                }
-                if (session is null)
-                {
-                    Volatile.Write(ref pollPlaybackOrLyrics, 0);
-                    neteaseClock = null;
-                    await publisher.PublishAsync(Status("暂无播放会话"), cancellationToken);
-                    continue;
-                }
-                if (Interlocked.Exchange(ref readMetadata, 0) == 1)
-                {
-                    var metadata = await session.TryGetMediaPropertiesAsync().AsTask(cancellationToken);
-                    title = string.IsNullOrWhiteSpace(metadata?.Title) ? "未知曲目" : metadata.Title;
-                    artist = metadata?.Artist ?? "";
-                    album = metadata?.AlbumTitle ?? "";
-                    artwork = await LoadArtworkAsync(metadata?.Thumbnail, cancellationToken);
-                    player = IdentifyPlayer(session.SourceAppUserModelId);
-                    subtitle = metadata?.Subtitle;
-                    localLyricsKey = null;
-                }
-                var capability = session.GetPlaybackInfo();
-                var timeline = session.GetTimelineProperties();
-                var duration = timeline.EndTime - timeline.StartTime;
-                var position = timeline.Position - timeline.StartTime;
-                bool netease = player == "网易云音乐";
-                bool hasTimeline = (!netease || timeline.LastUpdatedTime > DateTimeOffset.UnixEpoch) &&
-                    (duration > TimeSpan.Zero || position > TimeSpan.Zero);
-                bool? playingHint = capability.PlaybackStatus switch
-                {
-                    PlaybackStatus.Playing => true, PlaybackStatus.Paused or PlaybackStatus.Stopped => false, _ => null
-                };
-                var localClock = netease ? (neteaseClock ??= new NeteaseClock()).Read(title, playingHint) : null;
-                if (netease && playingHint == true && position <= TimeSpan.Zero &&
-                    DateTimeOffset.UtcNow - timeline.LastUpdatedTime > TimeSpan.FromSeconds(10))
-                    hasTimeline = false;
-                bool useLocalClock = localClock is { HasPosition: true } && (!hasTimeline || position <= TimeSpan.Zero);
-                string? trackMetadata = subtitle;
-                if (localClock is { } local)
-                {
-                    if (useLocalClock || duration <= TimeSpan.Zero) duration = local.Duration;
-                    if (LocalLyrics.GetNeteaseId(subtitle) is null && local.Id.Length is > 0 and <= 20 && local.Id.All(char.IsAsciiDigit))
-                        trackMetadata = $"orpheus://song/{local.Id}";
-                }
-                var options = Volatile.Read(ref _options);
-                var localKey = $"{options.Folder}\n{title}\n{artist}\n{trackMetadata}";
-                if (localLyricsKey != localKey)
-                {
-                    lyrics = LocalLyrics.Find(options.Folder, title, artist, trackMetadata, player);
-                    localLyricsKey = localKey;
-                }
-                bool retryLookup = false;
-                if ((options.GeneralOnline || options.NeteaseOnline && netease) && lyrics.Count == 0)
-                {
-                    var id = LocalLyrics.GetNeteaseId(trackMetadata);
-                    var trackKey = id is null ? $"{title}\n{artist}\n{album}\n{Math.Round(duration.TotalSeconds)}" : $"id:{id}";
-                    var key = $"{options.NeteaseOnline}:{options.GeneralOnline}:{trackKey}";
-                    if (requestKey != key)
+                    if (current is null && (session is not null || unavailableSince.HasValue) && WaitForMedia())
+                        continue;
+                    if (current is not null && Environment.TickCount64 < Interlocked.Read(ref skipRecoveryUntil) && session is not null)
+                    {
+                        // 切歌间隙 Windows 可能暂时把系统首选会话切到另一个应用。
+                        current = manager.GetSessions().FirstOrDefault(candidate =>
+                            candidate.SourceAppUserModelId == session.SourceAppUserModelId) ?? current;
+                    }
+                    if (!Equals(current, session))
+                    {
+                        Unsubscribe();
+                        CancelLyrics();
+                        session = current;
+                        artwork = default;
+                        Interlocked.Exchange(ref readMetadata, 1);
+                        if (session is not null)
+                        {
+                            session.MediaPropertiesChanged += OnMediaChanged;
+                            session.PlaybackInfoChanged += OnPlaybackChanged;
+                            session.TimelinePropertiesChanged += OnTimelineChanged;
+                        }
+                    }
+                    if (session is null)
+                    {
+                        Volatile.Write(ref pollPlaybackOrLyrics, 0);
+                        neteaseClock = null;
+                        unavailableSince = null;
+                        await publisher.PublishAsync(Status("暂无播放会话"), cancellationToken);
+                        continue;
+                    }
+                    if (Interlocked.Exchange(ref readMetadata, 0) == 1)
+                    {
+                        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        deadline.CancelAfter(TimeSpan.FromSeconds(2));
+                        GlobalSystemMediaTransportControlsSessionMediaProperties? metadata = null;
+                        try { metadata = await session.TryGetMediaPropertiesAsync().AsTask(deadline.Token); }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+                        if (string.IsNullOrWhiteSpace(metadata?.Title) && WaitForMedia())
+                        {
+                            Interlocked.Exchange(ref readMetadata, 1);
+                            continue;
+                        }
+                        var nextTitle = string.IsNullOrWhiteSpace(metadata?.Title) ? "未知曲目" : metadata.Title;
+                        var nextArtist = metadata?.Artist ?? "";
+                        var nextAlbum = metadata?.AlbumTitle ?? "";
+                        if (artwork.IsEmpty || nextTitle != title || nextArtist != artist || nextAlbum != album)
+                        {
+                            try { artwork = await LoadArtworkAsync(metadata?.Thumbnail, deadline.Token); }
+                            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { artwork = default; }
+                        }
+                        title = nextTitle;
+                        artist = nextArtist;
+                        album = nextAlbum;
+                        player = IdentifyPlayer(session.SourceAppUserModelId);
+                        subtitle = metadata?.Subtitle;
+                    }
+                    var capability = session.GetPlaybackInfo();
+                    if (capability?.Controls is null)
+                    {
+                        Volatile.Write(ref pollPlaybackOrLyrics, 1);
+                        Interlocked.Exchange(ref readMetadata, 1);
+                        continue;
+                    }
+                    unavailableSince = null;
+                    recoveringRead = false;
+                    var timeline = session.GetTimelineProperties();
+                    var duration = timeline.EndTime - timeline.StartTime;
+                    var position = timeline.Position - timeline.StartTime;
+                    bool netease = player == "网易云音乐";
+                    bool hasTimeline = (!netease || timeline.LastUpdatedTime > DateTimeOffset.UnixEpoch) &&
+                        (duration > TimeSpan.Zero || position > TimeSpan.Zero);
+                    bool? playingHint = capability.PlaybackStatus switch
+                    {
+                        PlaybackStatus.Playing => true, PlaybackStatus.Paused or PlaybackStatus.Stopped => false, _ => null
+                    };
+                    var localClock = netease ? (neteaseClock ??= new NeteaseClock()).Read(title, playingHint) : null;
+                    if (netease && playingHint == true && position <= TimeSpan.Zero &&
+                        DateTimeOffset.UtcNow - timeline.LastUpdatedTime > TimeSpan.FromSeconds(10))
+                        hasTimeline = false;
+                    bool useLocalClock = localClock is { HasPosition: true } && (!hasTimeline || position <= TimeSpan.Zero);
+                    string? trackMetadata = subtitle;
+                    if (localClock is { } local)
+                    {
+                        if (useLocalClock || duration <= TimeSpan.Zero) duration = local.Duration;
+                        if (LocalLyrics.GetNeteaseId(subtitle) is null && local.Id.Length is > 0 and <= 20 && local.Id.All(char.IsAsciiDigit))
+                            trackMetadata = $"orpheus://song/{local.Id}";
+                    }
+                    var options = Volatile.Read(ref _options);
+                    var localKey = $"{options.Folder}\n{title}\n{artist}\n{trackMetadata}";
+                    if (localLyricsKey != localKey)
+                    {
+                        lyrics = LocalLyrics.Find(options.Folder, title, artist, trackMetadata, player);
+                        localLyricsKey = localKey;
+                    }
+                    bool retryLookup = false;
+                    if ((options.GeneralOnline || options.NeteaseOnline && netease) && lyrics.Count == 0)
+                    {
+                        var id = LocalLyrics.GetNeteaseId(trackMetadata);
+                        var trackKey = id is null ? $"{title}\n{artist}\n{album}\n{Math.Round(duration.TotalSeconds)}" : $"id:{id}";
+                        var key = $"{options.NeteaseOnline}:{options.GeneralOnline}:{trackKey}";
+                        if (requestKey != key)
+                        {
+                            CancelLyrics();
+                            requestKey = key;
+                        }
+                        retryLookup = pendingLyrics is { IsCompletedSuccessfully: true } previous &&
+                            previous.Result.Count == 0 && lookupAttempts < 3;
+                        if (pendingLyrics is null || (retryLookup && Environment.TickCount64 - lookupStarted >= 15000))
+                        {
+                            lyricCancellation?.Dispose();
+                            lyricCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                            lookupStarted = Environment.TickCount64;
+                            lookupAttempts++;
+                            pendingLyrics = FindOnlineLyricsAsync(options, player, title, artist, album, trackMetadata, duration, lyricCancellation.Token);
+                            _ = pendingLyrics.ContinueWith(_ => Signal(), TaskScheduler.Default);
+                        }
+                    }
+                    else if (pendingLyrics is not null)
                     {
                         CancelLyrics();
-                        requestKey = key;
                     }
-                    retryLookup = pendingLyrics is { IsCompletedSuccessfully: true } previous &&
-                        previous.Result.Count == 0 && lookupAttempts < 3;
-                    if (pendingLyrics is null || (retryLookup && Environment.TickCount64 - lookupStarted >= 15000))
-                    {
-                        lyricCancellation?.Dispose();
-                        lyricCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        lookupStarted = Environment.TickCount64;
-                        lookupAttempts++;
-                        pendingLyrics = FindOnlineLyricsAsync(options, player, title, artist, album, trackMetadata, duration, lyricCancellation.Token);
-                        _ = pendingLyrics.ContinueWith(_ => Signal(), TaskScheduler.Default);
-                    }
+                    Volatile.Write(ref pollPlaybackOrLyrics, retryLookup || netease &&
+                        (!hasTimeline || useLocalClock || playingHint == true && position <= TimeSpan.Zero) ? 1 : 0);
+                    var activeLyrics = pendingLyrics is { IsCompletedSuccessfully: true } lookup && lyrics.Count == 0
+                        ? lookup.Result : lyrics;
+                    bool playing = capability.PlaybackStatus == PlaybackStatus.Playing ||
+                        (capability.PlaybackStatus is PlaybackStatus.Closed or PlaybackStatus.Opened or PlaybackStatus.Changing
+                            && useLocalClock && localClock!.Value.Playing);
+                    var rate = capability.PlaybackRate ?? 1;
+                    var active = session;
+                    var snapshot = new MediaSnapshot(artwork, useLocalClock ? localClock!.Value.Position : position,
+                        duration, useLocalClock || timeline.LastUpdatedTime <= DateTimeOffset.UnixEpoch
+                            ? DateTimeOffset.UtcNow : timeline.LastUpdatedTime, playing,
+                        double.IsFinite(rate) ? rate : 1,
+                        capability.Controls.IsPlaybackPositionEnabled && timeline.EndTime > timeline.StartTime
+                            ? (position, token) => SeekAsync(active, position, token, cancellationToken) : null,
+                        activeLyrics, player, hasTimeline || useLocalClock);
+                    await publisher.PublishAsync(new IslandEvent(Id, IslandEventType.Media, title, artist, "music",
+                        BuildActions(session, capability.Controls, playing, cancellationToken, BeginSkipRecovery), media: snapshot),
+                        cancellationToken);
                 }
-                else if (pendingLyrics is not null)
+                catch (Exception ex) when (ex is COMException or InvalidOperationException or IOException ||
+                    ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
                 {
-                    CancelLyrics();
+                    // 会话交接时 COM 对象可能短暂失效。保留现有画面并重新读取会话。
+                    if (!recoveringRead)
+                    {
+                        recoveringRead = true;
+                        unavailableSince = Environment.TickCount64;
+                    }
+                    Interlocked.Exchange(ref readMetadata, 1);
+                    Volatile.Write(ref pollPlaybackOrLyrics, 1);
                 }
-                Volatile.Write(ref pollPlaybackOrLyrics, retryLookup || netease &&
-                    (!hasTimeline || useLocalClock || playingHint == true && position <= TimeSpan.Zero) ? 1 : 0);
-                var activeLyrics = pendingLyrics is { IsCompletedSuccessfully: true } lookup && lyrics.Count == 0
-                    ? lookup.Result : lyrics;
-                bool playing = capability.PlaybackStatus == PlaybackStatus.Playing ||
-                    (capability.PlaybackStatus is PlaybackStatus.Closed or PlaybackStatus.Opened or PlaybackStatus.Changing
-                        && useLocalClock && localClock!.Value.Playing);
-                var rate = capability.PlaybackRate ?? 1;
-                var active = session;
-                var snapshot = new MediaSnapshot(artwork, useLocalClock ? localClock!.Value.Position : position,
-                    duration, useLocalClock || timeline.LastUpdatedTime <= DateTimeOffset.UnixEpoch
-                        ? DateTimeOffset.UtcNow : timeline.LastUpdatedTime, playing,
-                    double.IsFinite(rate) ? rate : 1,
-                    capability.Controls.IsPlaybackPositionEnabled && timeline.EndTime > timeline.StartTime
-                        ? (position, token) => SeekAsync(active, position, token, cancellationToken) : null,
-                    activeLyrics, player, hasTimeline || useLocalClock);
-                await publisher.PublishAsync(new IslandEvent(Id, IslandEventType.Media, title, artist, "music",
-                    BuildActions(session, capability.Controls, playing, cancellationToken), media: snapshot),
-                    cancellationToken);
             }
         }
         finally
@@ -287,21 +359,28 @@ internal sealed class MusicProvider : IIslandProvider
     }
 
     private static IEnumerable<IslandAction> BuildActions(Session session,
-        GlobalSystemMediaTransportControlsSessionPlaybackControls controls, bool playing, CancellationToken lifetime)
+        GlobalSystemMediaTransportControlsSessionPlaybackControls controls, bool playing, CancellationToken lifetime,
+        Action refreshAfterSkip)
     {
-        IslandAction Action(string title, Func<IAsyncOperation<bool>> command) => new(title, async token =>
+        IslandAction Action(string title, Func<IAsyncOperation<bool>> command, bool skip = false) => new(title, async token =>
         {
             using var canceled = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime);
             canceled.Token.ThrowIfCancellationRequested();
-            if (!await command().AsTask(canceled.Token))
+            if (skip) canceled.CancelAfter(TimeSpan.FromSeconds(3));
+            try
             {
-                throw new InvalidOperationException("播放器未接受命令。");
+                if (!await command().AsTask(canceled.Token))
+                    throw new InvalidOperationException("播放器未接受命令。");
+            }
+            finally
+            {
+                if (skip && !lifetime.IsCancellationRequested) refreshAfterSkip();
             }
         });
 
         if (controls.IsPreviousEnabled)
         {
-            yield return Action("上一首", session.TrySkipPreviousAsync);
+            yield return Action("上一首", session.TrySkipPreviousAsync, skip: true);
         }
         if (playing && controls.IsPauseEnabled)
         {
@@ -317,7 +396,7 @@ internal sealed class MusicProvider : IIslandProvider
         }
         if (controls.IsNextEnabled)
         {
-            yield return Action("下一首", session.TrySkipNextAsync);
+            yield return Action("下一首", session.TrySkipNextAsync, skip: true);
         }
     }
 

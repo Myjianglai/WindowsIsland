@@ -91,7 +91,7 @@ dotnet run --project src/Island.App/Island.App.csproj
 
 从 [GitHub 发布页](https://github.com/Myjianglai/WindowsIsland/releases) 下载 Windows x64 版 `Island.exe`，双击运行。私有仓库需要有访问权限的 GitHub 账号。
 
-在「设置 → 版本与更新」中手动检查。应用用 Git Credential Manager 中已有的 GitHub 授权查询最新正式版，发现更新后可在浏览器下载。退出旧程序后再替换 EXE。
+在「设置 → 版本与更新」中检查最新版。自 v0.2.6 起，可在应用内选择「下载并重启安装」。应用使用 Git Credential Manager 中已有的 GitHub 授权，校验 SHA-256 后替换所在目录的 EXE。原目录需要有写入权限，也可以从浏览器下载并手动替换。
 
 发布时更新 `src/Island.App/Island.App.csproj` 的 `Version`，提交并打上对应的 `v主版本.次版本.修订版本` 标签。推送提交和标签后，在该标签的 GitHub Release 中上传下列命令生成的 `Island.exe`。
 
