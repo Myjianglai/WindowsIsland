@@ -14,6 +14,7 @@ internal enum IslandShape { Capsule, Notch, Indicator }
 internal enum MusicPreview { Off, Cover, Rhythm, Track, Lyric }
 internal enum NotchItem { Quotas, Music, System, Clock, Devices, Shelf, Todo }
 internal enum IslandWheelAction { None, Pages, Volume }
+internal enum QuotaChartStyle { ProgressBar, Ring }
 internal sealed record PagePreference(IslandPage Page, bool Enabled);
 internal sealed record BatteryDeviceChoice(string Name, string Connection)
 {
@@ -54,6 +55,7 @@ internal sealed record IslandPreferences
     public bool QuotaWarnings { get; init; } = true;
     public bool MultipleRings { get; init; }
     public bool ShowRemaining { get; init; }
+    public QuotaChartStyle ExpandedQuotaChart { get; init; }
     public bool RingInitial { get; init; }
     public bool CompactClock { get; init; }
     public bool CompactQuotas { get; init; } = true;
@@ -117,6 +119,7 @@ internal sealed record IslandPreferences
             CompactMusic = Enum.IsDefined(CompactMusic) ? CompactMusic : MusicPreview.Off,
             ExpandPage = ExpandPage is { } opening && Enum.IsDefined(opening) ? opening : null,
             WheelAction = Enum.IsDefined(WheelAction) ? WheelAction : IslandWheelAction.None,
+            ExpandedQuotaChart = Enum.IsDefined(ExpandedQuotaChart) ? ExpandedQuotaChart : QuotaChartStyle.ProgressBar,
             CompactWidth = Math.Clamp(CompactWidth, 72, 720),
             CompactHeight = Math.Clamp(CompactHeight, 24, 64),
             CompactBatteryDevices = CompactBatteryDevices?.Where(device => device is not null &&

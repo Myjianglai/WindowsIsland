@@ -225,7 +225,9 @@ internal sealed class ExpandedTabs : DockPanel
 
     public void ApplyPreferences(IslandPreferences preferences)
     {
-        bool redrawQuotas = preferences.ShowRemaining != _preferences.ShowRemaining || preferences.Use24HourClock != _preferences.Use24HourClock;
+        bool redrawQuotas = preferences.ShowRemaining != _preferences.ShowRemaining ||
+            preferences.Use24HourClock != _preferences.Use24HourClock ||
+            preferences.ExpandedQuotaChart != _preferences.ExpandedQuotaChart;
         _preferences = preferences;
         _devices.ApplyPreferences(preferences);
         if (redrawQuotas) SetQuota(_quotaSnapshot);
@@ -374,11 +376,21 @@ internal sealed class ExpandedTabs : DockPanel
                 column.Children.Add(metric);
                 if (value is { } known)
                 {
-                    var bar = new ProgressBar { Height = 5, Maximum = 100, Value = Math.Clamp(known, 0, 100), BorderThickness = new Thickness(0) };
-                    bar.SetResourceReference(StyleProperty, "QuotaProgress");
-                    bar.SetResourceReference(ProgressBar.ForegroundProperty, IslandTheme.Account(account.Color));
-                    bar.SetResourceReference(ProgressBar.BackgroundProperty, IslandTheme.Edge);
-                    column.Children.Add(bar);
+                    if (_preferences.ExpandedQuotaChart == QuotaChartStyle.Ring)
+                    {
+                        var ring = QuotaDisplay.MetricRing(known, account.Color, QuotaDisplay.Describe(value, _preferences.ShowRemaining));
+                        ring.Margin = new Thickness(0, 1, 8, 0);
+                        DockPanel.SetDock(ring, Dock.Left);
+                        metric.Children.Insert(0, ring);
+                    }
+                    else
+                    {
+                        var bar = new ProgressBar { Height = 5, Maximum = 100, Value = Math.Clamp(known, 0, 100), BorderThickness = new Thickness(0) };
+                        bar.SetResourceReference(StyleProperty, "QuotaProgress");
+                        bar.SetResourceReference(ProgressBar.ForegroundProperty, IslandTheme.Account(account.Color));
+                        bar.SetResourceReference(ProgressBar.BackgroundProperty, IslandTheme.Edge);
+                        column.Children.Add(bar);
+                    }
                 }
                 columns.Children.Add(column);
             }
@@ -526,7 +538,7 @@ internal sealed class ExpandedTabs : DockPanel
             _previousLyric.Text = _nextLyric.Text = "";
             _lyric.Text = _media is not null && !_preferences.GeneralOnlineLyrics &&
                 !(_media.Player == "网易云音乐" && _preferences.NeteaseOnlineLyrics)
-                ? "可在设置中启用自动获取歌词" : "暂无同步歌词";
+                ? "在设置 → 显示器与时钟中开启跨播放器自动获取歌词" : "暂无同步歌词";
         }
     }
 

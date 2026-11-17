@@ -94,6 +94,24 @@ internal static class QuotaDisplay
     public static string Describe(double? value, bool remaining) =>
         value is { } number ? $"{(remaining ? "剩余" : "已用")} {number:0.#}%" : "额度未知";
 
+    public static Canvas MetricRing(double value, string color, string description)
+    {
+        const double center = 21;
+        const double radius = 17;
+        var ring = new Canvas { Width = center * 2, Height = center * 2, ToolTip = description };
+        var track = new Path { Data = new EllipseGeometry(new Point(center, center), radius, radius), StrokeThickness = 4 };
+        track.SetResourceReference(Shape.StrokeProperty, IslandTheme.Edge);
+        ring.Children.Add(track);
+        if (value > 0)
+        {
+            var fill = new Path { Data = Arc(center, radius, Math.Clamp(value / 100, 0, 1)), StrokeThickness = 4,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+            fill.SetResourceReference(Shape.StrokeProperty, IslandTheme.Account(color));
+            ring.Children.Add(fill);
+        }
+        return ring;
+    }
+
     internal static Geometry Arc(double center, double radius, double fraction)
     {
         if (fraction >= .9999)

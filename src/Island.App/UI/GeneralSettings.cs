@@ -128,6 +128,7 @@ internal sealed class GeneralSettings : ScrollViewer
         var ringInitial = Check(settings.RingInitial);
         var quotaWarnings = Check(settings.QuotaWarnings);
         bool showRemaining = settings.ShowRemaining;
+        var quotaChart = settings.ExpandedQuotaChart;
         var preview = new ComboBox { ItemsSource = new[] { "不显示文字", "歌名", "当前歌词" },
             SelectedIndex = settings.CompactMusic is MusicPreview.Track ? 1 : settings.CompactMusic is MusicPreview.Lyric ? 2 : 0 };
         var cover = Check(settings.ShowMusicCover || settings.CompactMusic == MusicPreview.Cover);
@@ -142,7 +143,10 @@ internal sealed class GeneralSettings : ScrollViewer
         bool useMultipleRings = settings.MultipleRings;
         var ringChoices = SettingsRows.Choices(useMultipleRings ? 1 : 0, index => { useMultipleRings = index == 1; QueueApply(); }, "单环", "多环");
         var quotaChoices = SettingsRows.Choices(showRemaining ? 1 : 0, index => { showRemaining = index == 1; QueueApply(); }, "已用额度", "剩余额度");
-        QuotaAppearance.Children.Add(SettingsRows.Row("环的样式", ringChoices));
+        var chartChoices = SettingsRows.Choices((int)quotaChart,
+            index => { quotaChart = (QuotaChartStyle)index; QueueApply(); }, "进度条", "环形");
+        QuotaAppearance.Children.Add(SettingsRows.Row("展开页图表", chartChoices));
+        QuotaAppearance.Children.Add(SettingsRows.Row("收起时配额环", ringChoices));
         QuotaAppearance.Children.Add(SettingsRows.Row("显示已用或剩余", quotaChoices));
         QuotaAppearance.Children.Add(SettingsRows.Row("环内显示首字母", ringInitial));
 
@@ -184,7 +188,7 @@ internal sealed class GeneralSettings : ScrollViewer
         autoLyrics.ToolTip = "直连网易云音乐。优先发送歌曲 ID，必要时用歌名和歌手搜索。";
         display.Children.Add(SettingsRows.Row("网易云自动获取歌词（联网）", autoLyrics));
         var generalLyrics = Check(settings.GeneralOnlineLyrics);
-        generalLyrics.ToolTip = "向 LRCLIB 和网易云查询曲名、歌手及匹配所需的曲目信息。";
+        generalLyrics.ToolTip = "优先向当前播放器的歌词服务查询，也可通过 LRCLIB 或网易云匹配。查询会发送曲名和歌手等曲目信息。";
         display.Children.Add(SettingsRows.Row("跨播放器自动获取歌词（联网）", generalLyrics));
 
         SettingsRows.Section(expanded, "显示的页面（可拖动排序）");
@@ -256,6 +260,7 @@ internal sealed class GeneralSettings : ScrollViewer
             ringInitial.IsChecked = defaults.RingInitial;
             SettingsRows.SelectChoice(ringChoices, defaults.MultipleRings ? 1 : 0);
             SettingsRows.SelectChoice(quotaChoices, defaults.ShowRemaining ? 1 : 0);
+            SettingsRows.SelectChoice(chartChoices, (int)defaults.ExpandedQuotaChart);
         }));
 
         SettingsRows.Section(behavior, "窗口行为");
@@ -341,6 +346,7 @@ internal sealed class GeneralSettings : ScrollViewer
                 CompactClock = compactClock.IsChecked == true,
                 QuotaWarnings = quotaWarnings.IsChecked == true, MultipleRings = useMultipleRings,
                 RingInitial = ringInitial.IsChecked == true, ShowRemaining = showRemaining,
+                ExpandedQuotaChart = quotaChart,
                 CompactDevices = compactDevices.IsChecked == true, CompactShelfCount = compactShelfCount.IsChecked == true,
                 CompactBatteryDevices = _batterySettings.Selection,
                 ExpandedBatteryHidden = _batterySettings.ExpandedHidden,

@@ -193,7 +193,7 @@ internal sealed class MusicProvider : IIslandProvider
                         lyricCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                         lookupStarted = Environment.TickCount64;
                         lookupAttempts++;
-                        pendingLyrics = FindOnlineLyricsAsync(options, netease, title, artist, album, trackMetadata, duration, lyricCancellation.Token);
+                        pendingLyrics = FindOnlineLyricsAsync(options, player, title, artist, album, trackMetadata, duration, lyricCancellation.Token);
                         _ = pendingLyrics.ContinueWith(_ => Signal(), TaskScheduler.Default);
                     }
                 }
@@ -237,17 +237,22 @@ internal sealed class MusicProvider : IIslandProvider
 
     public static IslandEvent Status(string title) => new(SourceId, IslandEventType.Media, title);
 
-    private async Task<IReadOnlyList<LyricLine>> FindOnlineLyricsAsync(LyricsOptions options, bool netease,
+    private async Task<IReadOnlyList<LyricLine>> FindOnlineLyricsAsync(LyricsOptions options, string? player,
         string title, string artist, string album, string? metadata, TimeSpan duration, CancellationToken token)
     {
-        if (netease)
+        if (player == "网易云音乐")
         {
             var native = await _neteaseLyrics.FindAsync(title, artist, metadata, duration, token);
             if (native.Count > 0 || !options.GeneralOnline) return native;
         }
+        else if (player is "QQ 音乐" or "酷狗音乐")
+        {
+            var native = await PlayerLyrics.FindAsync(player, title, artist, duration, token);
+            if (native.Count > 0) return native;
+        }
         token.ThrowIfCancellationRequested();
         var synced = await _lrcLibLyrics.FindAsync(title, artist, album, duration, token);
-        if (synced.Count > 0 || netease || duration <= TimeSpan.Zero) return synced;
+        if (synced.Count > 0 || player == "网易云音乐") return synced;
         token.ThrowIfCancellationRequested();
         return await _neteaseLyrics.FindByTrackAsync(title, artist, duration, token);
     }
