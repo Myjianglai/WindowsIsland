@@ -7,11 +7,13 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Island</AssemblyName>
-    <Version>0.2.10</Version>
+    <Version>0.2.11</Version>
     <ApplicationIcon>Assets/Island.ico</ApplicationIcon>
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <ProjectReference Include="../Island.Core/Island.Core.csproj" />
     <EmbeddedResource Include="Licenses/BrimDeck-Apache-2.0.txt" LogicalName="Island.BrimDeckLicense" />
   </ItemGroup>

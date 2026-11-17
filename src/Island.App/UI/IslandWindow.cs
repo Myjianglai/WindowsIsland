@@ -39,6 +39,7 @@ internal sealed class IslandWindow : Window
     private readonly ExpandedTabs _tabs;
     private IntPtr _handle;
     private IntPtr _beforeTodoEditing;
+    private bool _webKeyboard;
     private System.Drawing.Point _dragStart;
     private System.Drawing.Point _windowStart;
     private bool _dragged;
@@ -117,6 +118,22 @@ internal sealed class IslandWindow : Window
             });
         };
         _tabs.TodoEditingChanged += SetTodoKeyboardFocus;
+        _tabs.Xiaohongshu.KeyboardRequested += () =>
+        {
+            if (_webKeyboard) return;
+            _webKeyboard = true;
+            SetTodoKeyboardFocus(true);
+        };
+        _tabs.Xiaohongshu.Hidden += () =>
+        {
+            if (!_webKeyboard) return;
+            _webKeyboard = false;
+            SetTodoKeyboardFocus(false);
+        };
+        _tabs.WebPageChanged += () => Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_state == IslandState.Expanded) Display(IslandState.Expanded, null);
+        }));
         _todoPreview = _tabs.GetTodoPreview(DateTimeOffset.Now);
         _tabs.TodoItemsChanged += () => UpdateTodoPreview(DateTimeOffset.Now);
         _tabs.ShelfChanged += () =>
@@ -172,7 +189,11 @@ internal sealed class IslandWindow : Window
             e.Handled = true;
         };
         SystemEvents.DisplaySettingsChanged += OnDisplaysChanged;
-        Closed += (_, _) => SystemEvents.DisplaySettingsChanged -= OnDisplaysChanged;
+        Closed += (_, _) =>
+        {
+            SystemEvents.DisplaySettingsChanged -= OnDisplaysChanged;
+            _tabs.Xiaohongshu.Dispose();
+        };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -340,12 +361,18 @@ internal sealed class IslandWindow : Window
         _awaitingCollapse = completed is not null;
         _banner = message;
         var visualState = _avoided ? IslandState.Compact : state;
+        if (visualState != IslandState.Expanded || previousState != IslandState.Expanded || !_tabs.IsWebPage)
+            _tabs.Xiaohongshu.SetPanelReady(false);
         if (visualState == IslandState.Expanded && previousState == IslandState.Compact)
             _tabs.SelectOpeningPage();
         bool returnToTaskbar = visualState == IslandState.Compact && (previousState != IslandState.Compact || completed is not null);
         double panelWidth = ExpandedWidth();
+        double panelHeight = visualState == IslandState.Expanded && _tabs.IsWebPage ? ExpandedWebHeight() : PanelHeight;
         if (visualState == IslandState.Expanded)
+        {
+            Height = Math.Max(BaseHeight, panelHeight + 24) * _preferences.Scale / 100d;
             Width = Math.Max(Width, (panelWidth + 24) * _preferences.Scale / 100d);
+        }
         PlaceDock(visualState == IslandState.Compact && !returnToTaskbar);
         if (visualState != IslandState.Compact || _inTaskbar || _preferences.AlwaysOnTop)
             Topmost = true;
@@ -379,7 +406,7 @@ internal sealed class IslandWindow : Window
         if (_inTaskbar) thickness = Math.Min(thickness, _taskbarThickness);
         var (width, height) = visualState switch
         {
-            IslandState.Expanded => (panelWidth, PanelHeight),
+            IslandState.Expanded => (panelWidth, panelHeight),
             IslandState.Banner => (390d, 144d),
             _ when vertical => (thickness, Math.Min(length, Height / (_preferences.Scale / 100d))),
             _ => (length, thickness)
@@ -410,6 +437,8 @@ internal sealed class IslandWindow : Window
         Animate(FrameworkElement.WidthProperty, width);
         Animate(FrameworkElement.HeightProperty, height, () =>
         {
+            if (_revision == revision && visualState == IslandState.Expanded && _tabs.IsWebPage)
+                _tabs.Xiaohongshu.SetPanelReady(true);
             if (_revision == revision && visualState == IslandState.Compact)
             {
                 if (compact is not null && vertical)
@@ -840,7 +869,7 @@ internal sealed class IslandWindow : Window
     {
         for (var target = e.OriginalSource as Visual; target is not null; target = VisualTreeHelper.GetParent(target) as Visual)
         {
-            if (target is System.Windows.Controls.Primitives.ButtonBase or TextBox or ComboBox or ScrollViewer or Slider)
+            if (target is System.Windows.Controls.Primitives.ButtonBase or TextBox or ComboBox or ScrollViewer or Slider or XiaohongshuPage)
             {
                 return;
             }
@@ -912,6 +941,14 @@ internal sealed class IslandWindow : Window
         var work = screen.WorkingArea;
         double dpi = GetTargetDpi(new System.Drawing.Point(work.Left + work.Width / 2, work.Top + work.Height / 2));
         return Math.Clamp(work.Width * 9600d / (dpi * _preferences.Scale) - 28, 300, PanelWidth);
+    }
+
+    private double ExpandedWebHeight()
+    {
+        if (DockScreen() is not { } screen) return 445;
+        var work = screen.WorkingArea;
+        double dpi = GetTargetDpi(new System.Drawing.Point(work.Left + work.Width / 2, work.Top + work.Height / 2));
+        return Math.Clamp(work.Height * 9600d / (dpi * _preferences.Scale) - 30, 200, 445);
     }
 
     private void PlaceDock(bool compact)

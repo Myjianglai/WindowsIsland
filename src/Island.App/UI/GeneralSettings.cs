@@ -415,6 +415,7 @@ internal sealed class GeneralSettings : ScrollViewer
     public static string PageLabel(IslandPage page) => page switch
     {
         IslandPage.Music => "音乐", IslandPage.Clipboard => "剪贴板", IslandPage.Quota => "AI 额度",
-        IslandPage.Devices => "设备电量", IslandPage.Shelf => "文件中转", IslandPage.Todo => "待办清单", _ => "系统监控"
+        IslandPage.Devices => "设备电量", IslandPage.Shelf => "文件中转", IslandPage.Todo => "待办清单",
+        IslandPage.Xiaohongshu => "小红书", _ => "系统监控"
     };
 }

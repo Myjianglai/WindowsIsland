@@ -29,6 +29,9 @@ internal sealed class ExpandedTabs : DockPanel
     private readonly DeviceBatteryView _devices = new();
     private readonly FileShelf _shelf = new();
     private readonly TodoView _todo = new();
+    public XiaohongshuPage Xiaohongshu { get; } = new();
+    public bool IsWebPage => ReferenceEquals(_page.Child, Xiaohongshu);
+    public event Action? WebPageChanged;
     private readonly Dictionary<IslandPage, (Button Button, FrameworkElement Page)> _pages = new();
     private readonly StackPanel _navigation = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _headerClock = Label("", 13, Muted);
@@ -124,6 +127,7 @@ internal sealed class ExpandedTabs : DockPanel
         AddPage(IslandPage.Devices, _devices);
         AddPage(IslandPage.Shelf, _shelfPage);
         AddPage(IslandPage.Todo, _todo);
+        AddPage(IslandPage.Xiaohongshu, Xiaohongshu);
         var refresh = IconButton("刷新额度", PanelIcons.Refresh());
         refresh.IsEnabled = refreshQuota is not null;
         refresh.Click += (_, _) => refreshQuota?.Invoke();
@@ -372,6 +376,7 @@ internal sealed class ExpandedTabs : DockPanel
 
     private void SelectPage(IslandPage key)
     {
+        bool wasWebPage = IsWebPage;
         if (key != IslandPage.Todo) _todo.CancelEditing();
         _selectedPage = key;
         _shelfColumn.Child = null;
@@ -383,6 +388,7 @@ internal sealed class ExpandedTabs : DockPanel
         _clipboardPage.ColumnDefinitions[1].Width = HasShelf ? new GridLength(42, GridUnitType.Star) : new GridLength(0);
         var selected = _pages[key];
         _page.Child = selected.Page;
+        if (wasWebPage != IsWebPage) WebPageChanged?.Invoke();
         foreach (Button button in _navigation.Children)
         {
             button.SetResourceReference(Button.ForegroundProperty, ReferenceEquals(button, selected.Button) ? IslandTheme.Accent : Muted);

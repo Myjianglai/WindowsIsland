@@ -15,6 +15,7 @@ internal static class PanelIcons
         IslandPage.Devices => "M3,5 H14 V13 H3 Z M16,7 V11 M6,7 V11 M9,7 V11",
         IslandPage.Shelf => "M2,6 H16 V15 H2 Z M4,6 L6,3 H12 L14,6 M7,9 H11",
         IslandPage.Todo => "M3,4 L4.5,5.5 L7,2.5 M9,4 H16 M3,9 L4.5,10.5 L7,7.5 M9,9 H16 M3,14 L4.5,15.5 L7,12.5 M9,14 H16",
+        IslandPage.Xiaohongshu => "M3,3 H15 V16 H3 Z M6,6 H12 M6,9 H12 M6,12 H10",
         _ => "M1,9 H5 L7,4 L10,14 L12,9 H17"
     });
 

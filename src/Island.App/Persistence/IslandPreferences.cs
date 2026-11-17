@@ -8,7 +8,7 @@ using Island.Core.Events;
 namespace Island.App.Persistence;
 
 internal enum DockEdge { Top, Left, Right, Bottom }
-internal enum IslandPage { Overview, Music, Clipboard, Quota, Devices, Shelf, Todo }
+internal enum IslandPage { Overview, Music, Clipboard, Quota, Devices, Shelf, Todo, Xiaohongshu }
 internal enum IslandSkin { Dark, Cream }
 internal enum IslandShape { Capsule, Notch, Indicator }
 internal enum MusicPreview { Off, Cover, Rhythm, Track, Lyric }
@@ -84,7 +84,9 @@ internal sealed record IslandPreferences
     public bool NeteaseOnlineLyrics { get; init; }
     public bool GeneralOnlineLyrics { get; init; }
     public PagePreference[] Pages { get; init; } =
-        Enum.GetValues<IslandPage>().Select(page => new PagePreference(page, true)).ToArray();
+        Enum.GetValues<IslandPage>().Select(DefaultPage).ToArray();
+
+    private static PagePreference DefaultPage(IslandPage page) => new(page, page != IslandPage.Xiaohongshu);
 
     public static IslandPreferences Load()
     {
@@ -108,7 +110,7 @@ internal sealed record IslandPreferences
         {
             if (!pages.Any(item => item.Page == page))
             {
-                pages.Add(new PagePreference(page, true));
+                pages.Add(DefaultPage(page));
             }
         }
         return this with
