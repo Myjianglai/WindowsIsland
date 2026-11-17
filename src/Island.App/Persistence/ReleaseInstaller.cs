@@ -55,7 +55,7 @@ internal static class ReleaseInstaller
         var helper = Path.Combine(directory, HelperName);
         using var process = Process.GetCurrentProcess();
         var plan = new Plan(Path.GetFileName(target), process.Id, process.StartTime.ToUniversalTime().Ticks, sha256);
-        File.Copy(target, helper);
+        File.Copy(target, helper, overwrite: true);
         File.WriteAllText(Path.Combine(directory, PlanName), JsonSerializer.Serialize(plan));
         var start = new ProcessStartInfo(helper) { UseShellExecute = false, WorkingDirectory = directory };
         start.ArgumentList.Add(InstallArgument);

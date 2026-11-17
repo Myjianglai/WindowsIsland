@@ -274,7 +274,9 @@ internal sealed class MusicProvider : IIslandProvider
                             ? DateTimeOffset.UtcNow : timeline.LastUpdatedTime, playing,
                         double.IsFinite(rate) ? rate : 1,
                         capability.Controls.IsPlaybackPositionEnabled && duration > TimeSpan.Zero
-                            ? (position, token) => SeekAsync(active, position, duration, token, cancellationToken) : null,
+                            ? (position, token) => SeekAsync(active, position, duration, token, cancellationToken)
+                            : netease && (hasTimeline || useLocalClock) && duration > TimeSpan.Zero
+                                ? (position, token) => NeteaseSeek.SetAsync(position, duration, token) : null,
                         activeLyrics, player, hasTimeline || useLocalClock);
                     await publisher.PublishAsync(new IslandEvent(Id, IslandEventType.Media, title, artist, "music",
                         BuildActions(session, capability.Controls, playing, cancellationToken, BeginSkipRecovery), media: snapshot),

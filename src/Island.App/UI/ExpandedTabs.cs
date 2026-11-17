@@ -216,6 +216,7 @@ internal sealed class ExpandedTabs : DockPanel
                     UpdateProgress();
                 }
             }
+            catch (InvalidOperationException ex) { _artist.Text = ex.Message; }
             catch (Exception) { _artist.Text = "播放器暂时无法调整进度"; }
         }), true);
         _progress.LostMouseCapture += (_, _) =>

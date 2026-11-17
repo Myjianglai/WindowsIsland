@@ -21,11 +21,14 @@ internal sealed class ReleaseSettings : StackPanel
     private static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false });
     private static readonly SemaphoreSlim InstallGate = new(1, 1);
     private sealed record ReleaseAsset(Version Version, long Size, string Sha256);
+    private sealed record PreparedUpdate(ReleaseAsset Asset, string Path);
+    private static PreparedUpdate? _prepared;
+    private static event Action? PreparedChanged;
 
     public ReleaseSettings(Action restart)
     {
         var check = new Button { Content = "检查更新" };
-        var install = new Button { Content = "下载并重启安装", IsEnabled = false };
+        var install = new Button { Content = "下载更新", IsEnabled = false };
         var open = new Button { Content = "打开 GitHub 发布页" };
         var status = new TextBlock
         {
@@ -36,8 +39,35 @@ internal sealed class ReleaseSettings : StackPanel
         Children.Add(SettingsRows.Row($"当前版本 {Current.ToString(3)}", check));
         Children.Add(SettingsRows.Row("安装新版本", install));
         Children.Add(SettingsRows.Row("发布说明", open));
+        var downloadBar = new ProgressBar
+        {
+            Height = 8, Maximum = 100, Margin = new Thickness(0, 14, 0, 0), Visibility = Visibility.Collapsed,
+            Foreground = SettingsRows.Brush("#226BDC"), Background = SettingsRows.Rule
+        };
+        System.Windows.Automation.AutomationProperties.SetName(downloadBar, "更新下载进度");
+        Children.Add(downloadBar);
         Children.Add(status);
         ReleaseAsset? available = null;
+        bool busy = false;
+
+        void RefreshActions()
+        {
+            check.IsEnabled = !busy;
+            install.IsEnabled = !busy && (available is not null || _prepared is not null);
+            install.Content = _prepared is null ? "下载更新" : "安装并重启";
+        }
+        void ShowPrepared()
+        {
+            if (!busy && _prepared is { } update)
+            {
+                downloadBar.Visibility = Visibility.Visible;
+                downloadBar.Value = 100;
+                status.Text = $"v{update.Asset.Version} 已下载并校验，可以安装并重启。";
+            }
+            RefreshActions();
+        }
+        Loaded += (_, _) => { PreparedChanged += ShowPrepared; ShowPrepared(); };
+        Unloaded += (_, _) => PreparedChanged -= ShowPrepared;
 
         open.Click += (_, _) =>
         {
@@ -46,8 +76,8 @@ internal sealed class ReleaseSettings : StackPanel
         };
         check.Click += async (_, _) =>
         {
-            check.IsEnabled = false;
-            install.IsEnabled = false;
+            busy = true;
+            RefreshActions();
             available = null;
             status.Text = "正在检查 GitHub 发布版本…";
             try
@@ -63,27 +93,56 @@ internal sealed class ReleaseSettings : StackPanel
             }
             finally
             {
-                check.IsEnabled = true;
-                install.IsEnabled = available is not null;
+                busy = false;
+                ShowPrepared();
             }
         };
         install.Click += async (_, _) =>
         {
-            if (available is not { } asset || !InstallGate.Wait(0)) return;
-            install.IsEnabled = check.IsEnabled = false;
+            if ((_prepared?.Asset ?? available) is not { } asset || !InstallGate.Wait(0)) return;
+            busy = true;
+            RefreshActions();
             string? path = null;
             bool started = false;
             try
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(8));
-                path = ReleaseInstaller.PrepareDownload();
-                status.Text = $"正在下载 v{asset.Version}…";
-                var progress = new Progress<int>(percent => status.Text = $"正在下载 v{asset.Version} · {percent}%");
-                await DownloadAsync(asset, path, progress, timeout.Token);
-                var fileVersion = FileVersionInfo.GetVersionInfo(path).ProductVersion?.Split('+', 2)[0];
-                if (!Version.TryParse(fileVersion, out var actual) || actual != asset.Version)
-                    throw new InvalidDataException("Unexpected executable version.");
-                status.Text = "校验通过，正在重启…";
+                if (_prepared is null)
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(8));
+                    path = ReleaseInstaller.PrepareDownload();
+                    downloadBar.Value = 0;
+                    downloadBar.Visibility = Visibility.Visible;
+                    status.Text = $"正在下载 v{asset.Version} · 0%";
+                    bool downloading = true;
+                    var totalMiB = asset.Size / 1048576d;
+                    var progress = new Progress<int>(percent =>
+                    {
+                        if (!downloading) return;
+                        downloadBar.Value = percent;
+                        status.Text = $"正在下载 v{asset.Version} · {percent}%（{totalMiB * percent / 100:0.0} / {totalMiB:0.0} MB）";
+                    });
+                    try { await DownloadAsync(asset, path, progress, timeout.Token); }
+                    finally { downloading = false; }
+                    var fileVersion = FileVersionInfo.GetVersionInfo(path).ProductVersion?.Split('+', 2)[0];
+                    if (!Version.TryParse(fileVersion, out var actual) || actual != asset.Version)
+                        throw new InvalidDataException("Unexpected executable version.");
+                    _prepared = new PreparedUpdate(asset, path);
+                    path = null;
+                    downloadBar.Value = 100;
+                    status.Text = $"v{asset.Version} 已下载并校验，可以安装并重启。";
+                    if (Window.GetWindow(this) is not { IsVisible: true } owner ||
+                        MessageBox.Show(owner, $"v{asset.Version} 已下载并校验。是否立即安装并重启灵动岛？",
+                            "更新已就绪", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+                        return;
+                }
+                if (!File.Exists(_prepared.Path))
+                {
+                    _prepared = null;
+                    downloadBar.Visibility = Visibility.Collapsed;
+                    status.Text = "更新文件已不存在，请重新下载。";
+                    return;
+                }
+                status.Text = "正在安装并重启…";
                 ReleaseInstaller.Start(asset.Sha256);
                 started = true;
                 restart();
@@ -98,7 +157,7 @@ internal sealed class ReleaseSettings : StackPanel
             }
             catch (Exception ex) when (ex is IOException or HttpRequestException or Win32Exception or CryptographicException)
             {
-                status.Text = "下载或校验失败，当前版本仍可使用。";
+                status.Text = _prepared is null ? "下载或校验失败，当前版本仍可使用。" : "无法启动安装，可以重试。";
             }
             finally
             {
@@ -108,7 +167,13 @@ internal sealed class ReleaseSettings : StackPanel
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
                 }
                 InstallGate.Release();
-                if (!started) install.IsEnabled = check.IsEnabled = true;
+                if (!started)
+                {
+                    PreparedChanged?.Invoke();
+                    busy = false;
+                    if (_prepared is null) downloadBar.Visibility = Visibility.Collapsed;
+                    RefreshActions();
+                }
             }
         };
     }
