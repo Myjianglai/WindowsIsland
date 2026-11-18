@@ -12,6 +12,7 @@ namespace Island.App.UI;
 internal sealed class FileShelf : StackPanel
 {
     private readonly List<string> _paths = [];
+    private readonly Dictionary<string, DateTimeOffset> _added = new(StringComparer.OrdinalIgnoreCase);
     private readonly StackPanel _rows = new();
     private readonly StackPanel _empty = new() { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 40, 0, 0) };
     private readonly TextBlock _status = ExpandedTabs.Label("把文件拖到小岛，可临时收集或拖出。", 12, IslandTheme.Muted);
@@ -36,12 +37,22 @@ internal sealed class FileShelf : StackPanel
 
     public void AddFiles(IEnumerable<string> paths)
     {
+        if (!ClipboardSettings.Options.Shelf) return;
         foreach (var path in paths.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).Reverse())
         {
             _paths.RemoveAll(item => string.Equals(item, path, StringComparison.OrdinalIgnoreCase));
             _paths.Insert(0, path);
+            _added[path] = DateTimeOffset.UtcNow;
         }
         Refresh();
+    }
+
+    public void Expire()
+    {
+        int minutes = ClipboardSettings.Options.ClearMinutes;
+        if (minutes <= 0) return;
+        var cutoff = DateTimeOffset.UtcNow.AddMinutes(-minutes);
+        if (_paths.RemoveAll(path => _added[path] <= cutoff && _added.Remove(path)) > 0) Refresh();
     }
 
     private void Refresh()
@@ -73,7 +84,7 @@ internal sealed class FileShelf : StackPanel
             var reveal = ExpandedTabs.MakeButton("定位");
             reveal.Click += (_, _) => Open(path, reveal: true);
             var remove = ExpandedTabs.MakeButton("移除");
-            remove.Click += (_, _) => { _paths.Remove(path); Refresh(); };
+            remove.Click += (_, _) => { _paths.Remove(path); _added.Remove(path); Refresh(); };
             DockPanel.SetDock(remove, Dock.Right);
             DockPanel.SetDock(reveal, Dock.Right);
             line.Children.Add(remove);

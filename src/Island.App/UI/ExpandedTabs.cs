@@ -29,9 +29,11 @@ internal sealed class ExpandedTabs : DockPanel
     private readonly DeviceBatteryView _devices = new();
     private readonly FileShelf _shelf = new();
     private readonly TodoView _todo = new();
+    public ActivityPanel Activity { get; } = new();
     public XiaohongshuPage Xiaohongshu { get; } = new();
     public bool IsWebPage => ReferenceEquals(_page.Child, Xiaohongshu);
-    public event Action? WebPageChanged;
+    public bool IsTodoPage => ReferenceEquals(_page.Child, _todo);
+    public event Action? ExpandedLayoutChanged;
     private readonly Dictionary<IslandPage, (Button Button, FrameworkElement Page)> _pages = new();
     private readonly StackPanel _navigation = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _headerClock = Label("", 13, Muted);
@@ -61,8 +63,9 @@ internal sealed class ExpandedTabs : DockPanel
     private bool _volumeDragging;
     private long _lastVolumeRead;
 
-    public bool IsEditing => IsMouseCaptureWithin || _todo.IsEditing;
-    public bool IsEditingTodo => _todo.IsEditing;
+    public bool IsEditing => IsMouseCaptureWithin || _todo.HoldsKeyboard || _todo.IsDatePickerOpen;
+    public bool IsEditingTodo => _todo.HoldsKeyboard;
+    public void ReleaseTodoEditorFocus(bool outsideWindow = false) => _todo.ReleaseEditorFocus(outsideWindow);
     public event Action<bool> TodoEditingChanged
     {
         add => _todo.EditingChanged += value;
@@ -124,9 +127,18 @@ internal sealed class ExpandedTabs : DockPanel
         _clipboardPage.Children.Add(_shelfColumn);
         AddPage(IslandPage.Clipboard, _clipboardPage);
         AddPage(IslandPage.Quota, _quotas);
+        AddPage(IslandPage.Agent, new StackPanel { Children = { Activity.QuotaSummary, Activity.Sessions } });
         AddPage(IslandPage.Devices, _devices);
         AddPage(IslandPage.Shelf, _shelfPage);
         AddPage(IslandPage.Todo, _todo);
+        AddPage(IslandPage.Messages, Activity.Messages);
+        ActivityPanel.SettingsChanged += () => ApplyPreferences(_preferences);
+        ClipboardSettings.Changed += () =>
+        {
+            _clipboard.Render();
+            _popupClipboard?.Render();
+            ApplyPreferences(_preferences);
+        };
         AddPage(IslandPage.Xiaohongshu, Xiaohongshu);
         var refresh = IconButton("刷新额度", PanelIcons.Refresh());
         refresh.IsEnabled = refreshQuota is not null;
@@ -142,7 +154,9 @@ internal sealed class ExpandedTabs : DockPanel
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _headerClock.HorizontalAlignment = HorizontalAlignment.Center;
         _headerClock.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumnSpan(_headerClock, 3);
+        _headerClock.Margin = new Thickness(8, 0, 8, 0);
+        _headerClock.TextTrimming = TextTrimming.CharacterEllipsis;
+        Grid.SetColumn(_headerClock, 1);
         _headerClock.IsHitTestVisible = false;
         header.SizeChanged += (_, e) => _headerClock.Visibility = e.NewSize.Width >= 430 ? Visibility.Visible : Visibility.Collapsed;
         Grid.SetColumn(commands, 2);
@@ -317,7 +331,12 @@ internal sealed class ExpandedTabs : DockPanel
         System.Windows.Automation.AutomationProperties.SetName(_compactLyricButton, compactLyrics ? "关闭岛上歌词" : "开启岛上歌词");
         if (redrawQuotas) SetQuota(_quotaSnapshot);
         _navigation.Children.Clear();
-        var enabled = preferences.Pages.Where(page => page.Enabled).ToArray();
+        var enabled = preferences.Pages.Where(page => page.Enabled &&
+            (page.Page != IslandPage.Todo || ActivityPanel.Options.Todo) &&
+            (page.Page != IslandPage.Messages || ActivityPanel.Options.Messages) &&
+            (page.Page != IslandPage.Agent || ActivityPanel.Options.Enabled) &&
+            (page.Page != IslandPage.Clipboard || ClipboardSettings.Enabled) &&
+            (page.Page != IslandPage.Shelf || ClipboardSettings.Options.Shelf)).ToArray();
         _enabled = enabled.Select(item => item.Page).ToArray();
         foreach (var item in enabled)
         {
@@ -336,6 +355,17 @@ internal sealed class ExpandedTabs : DockPanel
 
     public void SelectOpeningPage()
     {
+        if (Activity.Latest is not null && _enabled.Contains(IslandPage.Messages))
+        {
+            Activity.OpenLatestChannel();
+            SelectPage(IslandPage.Messages);
+            return;
+        }
+        if (Activity.Running.Length > 0 && _enabled.Contains(IslandPage.Agent))
+        {
+            SelectPage(IslandPage.Agent);
+            return;
+        }
         if (_preferences.ExpandPage is { } page && _enabled.Contains(page) && page != _selectedPage)
             SelectPage(page);
     }
@@ -368,15 +398,36 @@ internal sealed class ExpandedTabs : DockPanel
     private void AddPage(IslandPage key, FrameworkElement page)
     {
         var title = GeneralSettings.PageLabel(key);
-        var button = IconButton(title, PanelIcons.Page(key));
+        var icon = PanelIcons.Page(key);
+        Button button;
+        if (key == IslandPage.Messages)
+        {
+            var dot = new System.Windows.Shapes.Ellipse { Width = 6, Height = 6,
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 0, 0, 0), IsHitTestVisible = false };
+            dot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "AccountGreen");
+            var overlay = new Grid { Children = { icon, dot } };
+            button = IconButton(title, overlay);
+            void UpdateUnread()
+            {
+                bool unread = Activity.Latest is not null;
+                dot.Visibility = unread ? Visibility.Visible : Visibility.Collapsed;
+                button.ToolTip = unread ? "消息 · 有未读" : "消息";
+            }
+            Activity.UnreadChanged += UpdateUnread;
+            ActivityPanel.SettingsChanged += UpdateUnread;
+            UpdateUnread();
+        }
+        else button = IconButton(title, icon);
         System.Windows.Automation.AutomationProperties.SetName(button, title + "标签页");
-        button.Click += (_, _) => SelectPage(key);
+        button.Click += (_, _) => { if (key == IslandPage.Clipboard) OpenClipboard(); else SelectPage(key); };
         _pages.Add(key, (button, page));
     }
 
     private void SelectPage(IslandPage key)
     {
         bool wasWebPage = IsWebPage;
+        bool wasTodoPage = IsTodoPage;
         if (key != IslandPage.Todo) _todo.CancelEditing();
         _selectedPage = key;
         _shelfColumn.Child = null;
@@ -388,12 +439,14 @@ internal sealed class ExpandedTabs : DockPanel
         _clipboardPage.ColumnDefinitions[1].Width = HasShelf ? new GridLength(42, GridUnitType.Star) : new GridLength(0);
         var selected = _pages[key];
         _page.Child = selected.Page;
-        if (wasWebPage != IsWebPage) WebPageChanged?.Invoke();
+        if (wasWebPage != IsWebPage || wasTodoPage != IsTodoPage) ExpandedLayoutChanged?.Invoke();
         foreach (Button button in _navigation.Children)
         {
             button.SetResourceReference(Button.ForegroundProperty, ReferenceEquals(button, selected.Button) ? IslandTheme.Accent : Muted);
             button.SetResourceReference(BackgroundProperty, ReferenceEquals(button, selected.Button) ? IslandTheme.Surface : IslandTheme.Tile);
-            if (button.Content is System.Windows.Shapes.Path icon)
+            var icon = button.Content as System.Windows.Shapes.Path ??
+                (button.Content as Grid)?.Children.OfType<System.Windows.Shapes.Path>().FirstOrDefault();
+            if (icon is not null)
                 icon.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty,
                     ReferenceEquals(button, selected.Button) ? IslandTheme.Accent : Muted);
         }
@@ -414,10 +467,37 @@ internal sealed class ExpandedTabs : DockPanel
 
     public void SetDevices(IslandEvent message) => _devices.Update(message);
 
-    public void SetClipboard(IslandEvent message) => _clipboard.Update(message);
+    private ClipboardHistoryView? _popupClipboard;
+    private Window? _clipboardWindow;
+    private IslandEvent? _lastClipboard;
+
+    public void SetClipboard(IslandEvent message)
+    {
+        _lastClipboard = message;
+        _clipboard.Update(message);
+        _popupClipboard?.Update(message);
+    }
+
+    public void OpenClipboard()
+    {
+        if (!_enabled.Contains(IslandPage.Clipboard)) return;
+        if (!ClipboardSettings.Options.Separate) { SelectPage(IslandPage.Clipboard); return; }
+        if (_clipboardWindow is not null) { _clipboardWindow.Activate(); return; }
+        var view = new ClipboardHistoryView { Margin = new Thickness(12) };
+        if (_lastClipboard is { } message) view.Update(message);
+        _popupClipboard = view;
+        _clipboardWindow = new Window { Title = "剪贴板历史", Width = 420, Height = 370,
+            Content = view, WindowStartupLocation = WindowStartupLocation.CenterScreen };
+        _clipboardWindow.SetResourceReference(Window.BackgroundProperty, IslandTheme.Surface);
+        _clipboardWindow.Closed += (_, _) => { _clipboardWindow = null; _popupClipboard = null; };
+        _clipboardWindow.Show();
+    }
+
+    public void ExpireShelf() => _shelf.Expire();
 
     public void SetQuota(QuotaSnapshot snapshot)
     {
+        Activity.SetQuotaSummary(snapshot, _preferences);
         _quotaSnapshot = snapshot;
         _quotas.Children.Clear();
         _resets.Clear();
@@ -587,7 +667,7 @@ internal sealed class ExpandedTabs : DockPanel
         if (_selectedPage is IslandPage.Todo or IslandPage.Music)
             clockFormat = _preferences.Use24HourClock ? "M月d日 ddd  HH:mm:ss" : "M月d日 ddd  h:mm:ss tt";
         _headerClock.Text = currentTime.ToString(clockFormat, CultureInfo.GetCultureInfo("zh-CN"));
-        if (ReferenceEquals(_page.Child, _quotas))
+        if (_selectedPage == IslandPage.Quota)
             foreach (var (label, reset) in _resets) label.Text = ResetText(reset);
         if (!ReferenceEquals(_page.Child, _music))
         {

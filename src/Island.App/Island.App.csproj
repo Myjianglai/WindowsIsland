@@ -7,12 +7,15 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Island</AssemblyName>
-    <Version>0.2.11</Version>
+    <Version>0.3.0</Version>
     <ApplicationIcon>Assets/Island.ico</ApplicationIcon>
     <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
   </PropertyGroup>
   <ItemGroup>
+    <Resource Include="Assets/openai.ico;Assets/claude.ico;Assets/wechat.ico;Assets/qq.ico;Assets/wecom.ico" />
+    <EmbeddedResource Include="../../tools/agent-hook.ps1" LogicalName="Island.AgentHook" />
     <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="MailKit" Version="5.0.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <ProjectReference Include="../Island.Core/Island.Core.csproj" />
     <EmbeddedResource Include="Licenses/BrimDeck-Apache-2.0.txt" LogicalName="Island.BrimDeckLicense" />

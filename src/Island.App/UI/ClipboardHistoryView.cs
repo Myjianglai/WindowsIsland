@@ -16,6 +16,7 @@ internal sealed class ClipboardHistoryView : DockPanel
     private readonly Button _clear = ExpandedTabs.MakeButton("清空");
     private readonly TextBlock _status = ExpandedTabs.Label("", 11, IslandTheme.Muted);
     private readonly StackPanel _rows = new();
+    private readonly ScrollViewer _scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly Dictionary<Guid, ImageSource> _thumbnails = new();
     private ClipboardSnapshot? _snapshot;
     private bool _onlyPinned;
@@ -33,7 +34,8 @@ internal sealed class ClipboardHistoryView : DockPanel
         Children.Add(header);
         DockPanel.SetDock(_status, Dock.Bottom);
         Children.Add(_status);
-        Children.Add(new ScrollViewer { Content = _rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        _scroll.Content = _rows;
+        Children.Add(_scroll);
         _all.Click += (_, _) => { _onlyPinned = false; Render(); };
         _pinned.Click += (_, _) => { _onlyPinned = true; Render(); };
         _clear.Click += async (_, _) =>
@@ -52,15 +54,16 @@ internal sealed class ClipboardHistoryView : DockPanel
         Render();
     }
 
-    private void Render()
+    public void Render()
     {
+        _scroll.MaxHeight = ClipboardSettings.Options.Visible * 34;
         _all.SetResourceReference(BackgroundProperty, _onlyPinned ? IslandTheme.Surface : IslandTheme.Tile);
         _pinned.SetResourceReference(BackgroundProperty, _onlyPinned ? IslandTheme.Tile : IslandTheme.Surface);
         _clear.IsEnabled = _snapshot is not null;
         _rows.Children.Clear();
         foreach (var item in _snapshot?.Entries.Where(item => !_onlyPinned || item.IsPinned) ?? [])
         {
-            var pin = ExpandedTabs.MakeButton(item.IsPinned ? "★" : "☆");
+            var pin = ExpandedTabs.MakeFlatButton(item.IsPinned ? "★" : "☆");
             pin.ToolTip = item.TogglePin.Label;
             pin.Click += async (_, _) => await RunAsync(item.TogglePin);
             DockPanel.SetDock(pin, Dock.Right);
@@ -92,7 +95,7 @@ internal sealed class ClipboardHistoryView : DockPanel
                 preview.Children.Add(date);
             }
             preview.Children.Add(label);
-            var copy = ExpandedTabs.MakeButton("");
+            var copy = ExpandedTabs.MakeFlatButton("");
             copy.Content = preview;
             copy.Margin = new Thickness(0);
             copy.HorizontalContentAlignment = HorizontalAlignment.Stretch;

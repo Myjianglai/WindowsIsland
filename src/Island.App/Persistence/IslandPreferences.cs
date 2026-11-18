@@ -8,7 +8,7 @@ using Island.Core.Events;
 namespace Island.App.Persistence;
 
 internal enum DockEdge { Top, Left, Right, Bottom }
-internal enum IslandPage { Overview, Music, Clipboard, Quota, Devices, Shelf, Todo, Xiaohongshu }
+internal enum IslandPage { Overview, Music, Clipboard, Quota, Devices, Shelf, Todo, Xiaohongshu, Messages, Agent }
 internal enum IslandSkin { Dark, Cream }
 internal enum IslandShape { Capsule, Notch, Indicator }
 internal enum MusicPreview { Off, Cover, Rhythm, Track, Lyric }

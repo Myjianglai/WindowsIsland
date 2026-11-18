@@ -80,15 +80,37 @@ internal sealed class IslandWindow : Window
     public event Action<IslandPreferences>? DockChanged;
     public bool IsDragging => _surface.IsMouseCaptured || _tabs.IsEditing;
     public bool IsEditingTodo => _tabs.IsEditingTodo;
+    public void OpenClipboard() => _tabs.OpenClipboard();
+    private (string Title, string Source, string State, int Count)? _activeAgent;
+    private IslandEvent? _compactMessage;
+
+    public void RecordMessage(IslandEvent message)
+    {
+        _tabs.Activity.Record(message);
+    }
+
+    public void CheckAgentActivity(Func<IslandEvent, bool> publish)
+    {
+        _tabs.Activity.Poll(publish);
+        var running = _tabs.Activity.Running;
+        (string Title, string Source, string State, int Count)? next = ActivityPanel.Options.Compact && running.Length > 0
+            ? (running[0].Title, running[0].Source, running[0].State, running.Length) : null;
+        var message = _tabs.Activity.CompactMessage;
+        if (next == _activeAgent && ReferenceEquals(message, _compactMessage)) return;
+        _activeAgent = next;
+        _compactMessage = message;
+        RefreshCompact();
+    }
     public void CheckTodoReminders(Func<IslandEvent, bool> publish)
     {
+        _tabs.ExpireShelf();
         var now = DateTimeOffset.Now;
-        _tabs.CheckTodoReminders(now, publish);
+        if (ActivityPanel.Options.Todo) _tabs.CheckTodoReminders(now, publish);
         UpdateTodoPreview(now);
     }
     public bool IsAvoided => _avoided || _fullscreen;
 
-    public IslandWindow(Action openSettings, Action? refreshQuota = null)
+    public IslandWindow(Action openSettings, Action? refreshQuota = null, Action? openMessageSettings = null)
     {
         Title = "Windows 灵动岛";
         Width = BaseWidth;
@@ -109,6 +131,12 @@ internal sealed class IslandWindow : Window
         IslandTheme.Apply(Resources, _preferences.Skin);
 
         _tabs = new ExpandedTabs(openSettings, refreshQuota);
+        _tabs.Activity.OpenMessageSettings = openMessageSettings ?? openSettings;
+        _tabs.Activity.UnreadChanged += () =>
+        {
+            _compactMessage = _tabs.Activity.CompactMessage;
+            RefreshCompact();
+        };
         _tabs.CompactLyricsToggled += () =>
         {
             bool enabled = _preferences.ShowCompactMusic && _preferences.CompactLyrics && _preferences.CompactMusic == MusicPreview.Lyric;
@@ -118,6 +146,11 @@ internal sealed class IslandWindow : Window
             });
         };
         _tabs.TodoEditingChanged += SetTodoKeyboardFocus;
+        AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler((_, e) =>
+        {
+            if (e.ChangedButton == MouseButton.Left) _tabs.ReleaseTodoEditorFocus();
+        }), handledEventsToo: true);
+        Deactivated += (_, _) => _tabs.ReleaseTodoEditorFocus(outsideWindow: true);
         _tabs.Xiaohongshu.KeyboardRequested += () =>
         {
             if (_webKeyboard) return;
@@ -130,7 +163,7 @@ internal sealed class IslandWindow : Window
             _webKeyboard = false;
             SetTodoKeyboardFocus(false);
         };
-        _tabs.WebPageChanged += () => Dispatcher.BeginInvoke(new Action(() =>
+        _tabs.ExpandedLayoutChanged += () => Dispatcher.BeginInvoke(new Action(() =>
         {
             if (_state == IslandState.Expanded) Display(IslandState.Expanded, null);
         }));
@@ -346,13 +379,13 @@ internal sealed class IslandWindow : Window
 
     private void RefreshCompact()
     {
-        if (_state == IslandState.Compact && !_awaitingCollapse)
-        {
-            Display(IslandState.Compact, null);
-        }
+        if (_state != IslandState.Compact) return;
+        if (_awaitingCollapse) { _compactRefreshPending = true; return; }
+        Display(IslandState.Compact, null);
     }
 
     private bool _awaitingCollapse;
+    private bool _compactRefreshPending;
 
     public void Display(IslandState state, IslandEvent? message, Action? completed = null)
     {
@@ -367,7 +400,9 @@ internal sealed class IslandWindow : Window
             _tabs.SelectOpeningPage();
         bool returnToTaskbar = visualState == IslandState.Compact && (previousState != IslandState.Compact || completed is not null);
         double panelWidth = ExpandedWidth();
-        double panelHeight = visualState == IslandState.Expanded && _tabs.IsWebPage ? ExpandedWebHeight() : PanelHeight;
+        double panelHeight = visualState == IslandState.Expanded
+            ? _tabs.IsWebPage ? ExpandedWebHeight() : _tabs.IsTodoPage ? PanelHeight + 65 : PanelHeight
+            : PanelHeight;
         if (visualState == IslandState.Expanded)
         {
             Height = Math.Max(BaseHeight, panelHeight + 24) * _preferences.Scale / 100d;
@@ -422,6 +457,16 @@ internal sealed class IslandWindow : Window
             _ => new CornerRadius(0, 0, radius, radius)
         };
         int revision = ++_revision;
+        void ApplyCompactContent()
+        {
+            if (compact is not null && vertical)
+                compact.LayoutTransform = new RotateTransform(_edge == DockEdge.Left ? -90 : 90);
+            _surface.Child = compact is null
+                ? (_preferences.Shape == IslandShape.Indicator || _maximizedStrip ? IndicatorFill() : null)
+                : new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = compact };
+        }
+        bool updateCompactNow = visualState == IslandState.Compact && previousState == IslandState.Compact && !returnToTaskbar;
+        if (updateCompactNow) ApplyCompactContent();
         if (visualState != IslandState.Compact)
         {
             _compactLyrics = null;
@@ -441,14 +486,12 @@ internal sealed class IslandWindow : Window
                 _tabs.Xiaohongshu.SetPanelReady(true);
             if (_revision == revision && visualState == IslandState.Compact)
             {
-                if (compact is not null && vertical)
-                    compact.LayoutTransform = new RotateTransform(_edge == DockEdge.Left ? -90 : 90);
-                _surface.Child = compact is null
-                    ? (_preferences.Shape == IslandShape.Indicator || _maximizedStrip ? IndicatorFill() : null)
-                    : new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = compact };
+                if (!updateCompactNow) ApplyCompactContent();
                 _awaitingCollapse = false;
                 Topmost = _preferences.AlwaysOnTop || _inTaskbar;
-                if (returnToTaskbar && !IsAvoided && _taskbarThickness > 0)
+                bool refresh = _compactRefreshPending;
+                _compactRefreshPending = false;
+                if (refresh || returnToTaskbar && !IsAvoided && _taskbarThickness > 0)
                     Display(IslandState.Compact, null);
             }
             completed?.Invoke();
@@ -467,6 +510,17 @@ internal sealed class IslandWindow : Window
             return null;
         }
         var content = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (_tabs.Activity.CompactMessage is { } message)
+        {
+            AddCompactSummary(content, message.Source, "你收到了一条消息", 0, "AccountGreen");
+            return content;
+        }
+        if (_activeAgent is { } agent)
+        {
+            AddCompactSummary(content, agent.Source, agent.Title, agent.Count, IslandTheme.Accent,
+                agent.State == "待确认");
+            return content;
+        }
         bool notch = _preferences.Shape == IslandShape.Notch;
         var groups = new Dictionary<NotchItem, StackPanel>();
         Panel Target(NotchItem item)
@@ -588,7 +642,7 @@ internal sealed class IslandWindow : Window
             label.Margin = new Thickness(6, 0, 3, 0);
             Target(NotchItem.Shelf).Children.Add(label);
         }
-        if (_preferences.CompactTodo && _todoPreview is { } todo)
+        if (ActivityPanel.Options.Todo && _preferences.CompactTodo && _todoPreview is { } todo)
         {
             var label = ExpandedTabs.Label(todo.Text, 11, todo.Overdue ? IslandTheme.Alert : IslandTheme.Ink);
             label.MaxWidth = 200;
@@ -605,7 +659,54 @@ internal sealed class IslandWindow : Window
                     content.Children.Add(group);
             }
         }
+        if (_tabs.Activity.UnreadCount is > 0 and int unread)
+        {
+            var badge = CompactCountBadge(unread);
+            badge.Margin = new Thickness(content.Children.Count > 0 ? 7 : 0, 0, 0, 0);
+            badge.ToolTip = $"{unread} 条未读消息";
+            System.Windows.Automation.AutomationProperties.SetName(badge, $"{unread} 条未读消息");
+            content.Children.Add(badge);
+        }
         return content.Children.Count > 0 ? content : null;
+    }
+
+    private static void AddCompactSummary(StackPanel content, string source, string title, int count, string accent,
+        bool waiting = false)
+    {
+        var dot = ExpandedTabs.Label("●", 11, accent);
+        if (waiting) dot.Foreground = SettingsRows.Brush("#F2A742");
+        var glyph = ExpandedTabs.Label(source switch { "Codex" => "CX", "Claude" => "CC", "微信" => "微",
+            "QQ" => "QQ", "邮箱" => "✉", _ => "◈" }, 10);
+        glyph.ToolTip = source;
+        var text = ExpandedTabs.Label(title, 13);
+        text.MaxWidth = 205;
+        text.TextTrimming = TextTrimming.CharacterEllipsis;
+        text.FontWeight = FontWeights.SemiBold;
+        FrameworkElement sourceIcon = source is "Codex" or "Claude" or "微信" or "QQ" or "邮箱" or "企业微信"
+            ? ActivityPanel.SourceIcon(source) : glyph;
+        foreach (var label in new FrameworkElement[] { dot, sourceIcon, text })
+        {
+            label.VerticalAlignment = VerticalAlignment.Center;
+            label.Margin = new Thickness(0, 0, 7, 0);
+            content.Children.Add(label);
+        }
+        var divider = ExpandedTabs.Label("╌╌", 12, IslandTheme.Muted);
+        divider.Margin = new Thickness(7, 0, 7, 0);
+        divider.VerticalAlignment = VerticalAlignment.Center;
+        content.Children.Add(divider);
+        if (count > 0) content.Children.Add(CompactCountBadge(count));
+    }
+
+    private static Border CompactCountBadge(int count)
+    {
+        var number = ExpandedTabs.Label(count.ToString(), 11);
+        number.Foreground = Brushes.White;
+        number.FontWeight = FontWeights.SemiBold;
+        number.HorizontalAlignment = HorizontalAlignment.Center;
+        number.VerticalAlignment = VerticalAlignment.Center;
+        return new Border { Child = number, MinWidth = 22, Height = 22, CornerRadius = new CornerRadius(11),
+            Padding = new Thickness(4, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center,
+            Background = SettingsRows.Brush("#224777") };
     }
 
     private FrameworkElement IndicatorFill()

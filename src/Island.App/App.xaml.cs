@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Threading;
 using Island.App.Persistence;
 using Island.App.Presentation;
@@ -35,6 +37,31 @@ public partial class App : Application
     private IslandPreferences _preferences = IslandPreferences.Load();
     private readonly DispatcherTimer _savePreferences = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private readonly MusicProvider _musicProvider = new();
+    private const int ClipboardHotkey = 0x517;
+    private IntPtr _hotkeyWindow;
+    private ClipboardOptions? _boundShortcut;
+    private ChatWindowAlerts? _chatAlerts;
+
+    [DllImport("user32.dll")]
+    private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(IntPtr window, int id);
+
+    private bool BindClipboardShortcut(ClipboardOptions options)
+    {
+        if (_hotkeyWindow == IntPtr.Zero) return false;
+        var old = _boundShortcut;
+        UnregisterHotKey(_hotkeyWindow, ClipboardHotkey);
+        bool Register(ClipboardOptions value) => RegisterHotKey(_hotkeyWindow, ClipboardHotkey,
+            (uint)value.Modifiers | 0x4000, (uint)KeyInterop.VirtualKeyFromKey(value.Key));
+        if (options.Shortcut && !Register(options))
+        {
+            if (old is { Shortcut: true }) Register(old);
+            return false;
+        }
+        _boundShortcut = options;
+        return true;
+    }
 
     public App()
     {
@@ -57,7 +84,8 @@ public partial class App : Application
             Shutdown();
             return;
         }
-        var window = new IslandWindow(OpenSettings, _quotas.Refresh);
+        var window = new IslandWindow(OpenSettings, _quotas.Refresh,
+            () => { OpenSettings(); _settings?.ShowMessageSettings?.Invoke(); });
         window.DockChanged += preferences =>
         {
             _settings?.SyncDock(preferences);
@@ -99,6 +127,20 @@ public partial class App : Application
             () => MusicProvider.Status("请在设置中启用音乐"),
             () => MusicProvider.Status("无法连接 Windows 播放会话"), _shutdown.Token);
         var hwnd = new WindowInteropHelper(window).Handle;
+        var messageSources = new MessageSources();
+        _chatAlerts = new ChatWindowAlerts(HwndSource.FromHwnd(hwnd), _events, messageSources);
+        _hotkeyWindow = hwnd;
+        ClipboardSettings.BindShortcut = BindClipboardShortcut;
+        BindClipboardShortcut(ClipboardSettings.Options);
+        HwndSource.FromHwnd(hwnd).AddHook((IntPtr target, int message, IntPtr wparam, IntPtr lparam, ref bool handled) =>
+        {
+            if (message == 0x0312 && wparam.ToInt32() == ClipboardHotkey && ClipboardSettings.Enabled)
+            {
+                Dispatcher.BeginInvoke(new Action(presenter.OpenClipboard));
+                handled = true;
+            }
+            return IntPtr.Zero;
+        });
         _clipboard = new ProviderHost(new ClipboardProvider(HwndSource.FromHwnd(hwnd)), _events,
             () => new IslandEvent(ClipboardProvider.SourceId, IslandEventType.Clipboard, "请在设置中启用剪贴板"),
             () => new IslandEvent(ClipboardProvider.SourceId, IslandEventType.Clipboard, "无法连接系统剪贴板"),
@@ -116,7 +158,8 @@ public partial class App : Application
                 () => new IslandEvent(QuotaProvider.SourceId, IslandEventType.Quota, "AI 额度"),
                 () => new IslandEvent(QuotaProvider.SourceId, IslandEventType.Quota, "无法启动额度数据源"), _shutdown.Token);
             await Task.WhenAll(presenter.RunAsync(_events, _shutdown.Token),
-                ApplySourcesAsync(_store.LoadSources()), quotaHost.SetEnabledAsync(true));
+                ApplySourcesAsync(_store.LoadSources()), quotaHost.SetEnabledAsync(true),
+                messageSources.RunAsync(_events, _shutdown.Token));
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
         {
@@ -126,6 +169,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _chatAlerts?.Dispose();
+        if (_hotkeyWindow != IntPtr.Zero) UnregisterHotKey(_hotkeyWindow, ClipboardHotkey);
         if (_savePreferences.IsEnabled) SavePreferences();
         _shutdown.Cancel();
         _events.Complete();

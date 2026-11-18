@@ -13,6 +13,7 @@ namespace Island.App.UI;
 
 internal sealed class SettingsWindow : Window
 {
+    public Action? ShowMessageSettings { get; private set; }
     public event Action? ExitRequested;
 
     private readonly GeneralSettings _general;
@@ -80,7 +81,7 @@ internal sealed class SettingsWindow : Window
         var toggles = new Dictionary<string, CheckBox>();
         foreach (var (id, label) in new (string, string)[]
         {
-            ("music", "音乐"), ("clipboard", "剪贴板"), ("notifications", "微信及企业微信通知"),
+            ("music", "音乐"), ("notifications", "微信及企业微信通知"),
             ("files", "文件变动"), ("mail", "邮件"), ("tasks", "微软待办"),
             ("system-monitor", "系统监控（收起时常驻）"), ("device-battery", "设备电量")
         })
@@ -103,6 +104,7 @@ internal sealed class SettingsWindow : Window
         };
         save.Click += async (_, _) =>
         {
+            sources = store.LoadSources();
             foreach (var (id, toggle) in toggles)
             {
                 sources[id] = toggle.IsChecked == true;
@@ -171,6 +173,11 @@ internal sealed class SettingsWindow : Window
         Category("功能与连接");
         AddPage("数据源", "\uE90F", new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         AddPage("AI 额度", "\uE9D9", new QuotaSettingsPanel(quotaAccounts, refreshQuotas, metricsFor, general.QuotaAppearance));
+        AddPage("AI 会话", "\uE8BD", ActivityPanel.Settings("AI 会话"));
+        AddPage("待办", "\uE9D5", ActivityPanel.Settings("待办"));
+        var messages = AddPage("消息", "\uEA8F", ActivityPanel.Settings("消息"));
+        ShowMessageSettings = () => messages.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        AddPage("剪贴板与文件", "\uE77F", ClipboardSettings.Build(store, applySources));
         Category("设备电量");
         var batteries = AddPage("显示与设备", "\uE850", new ScrollViewer
         {

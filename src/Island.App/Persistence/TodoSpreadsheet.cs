@@ -10,7 +10,7 @@ namespace Island.App.Persistence;
 
 internal static class TodoSpreadsheet
 {
-    private static readonly string[] Headers = ["标题", "提醒时间", "每周重复", "完成时间", "ID", "已提醒时间"];
+    private static readonly string[] Headers = ["标题", "提醒时间", "每周重复", "完成时间", "ID", "已提醒时间", "URL", "开始时间", "结束时间", "计划日期"];
     private static readonly string[] Days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
     public static void Export(string path, IReadOnlyList<TodoItem> items)
@@ -35,6 +35,10 @@ internal static class TodoSpreadsheet
             sheet.Cell(row, 4).Value = item.CompletedAt?.ToString("o") ?? "";
             sheet.Cell(row, 5).Value = item.Id.ToString();
             sheet.Cell(row, 6).Value = item.RemindedAt?.ToString("o") ?? "";
+            sheet.Cell(row, 7).Value = item.Url ?? "";
+            sheet.Cell(row, 8).Value = item.StartedAt?.ToString("o") ?? "";
+            sheet.Cell(row, 9).Value = item.EndedAt?.ToString("o") ?? "";
+            sheet.Cell(row, 10).Value = item.PlannedDay?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "";
         }
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".xlsx";
         try
@@ -88,7 +92,10 @@ internal static class TodoSpreadsheet
                 throw new InvalidDataException($"第 {row.RowNumber()} 行设置了重复日，请填写提醒时间。");
             var completed = Date(Cell(3), row.RowNumber());
             var id = Guid.TryParse(Cell(4)?.GetString(), out var value) && value != Guid.Empty ? value : Guid.NewGuid();
-            items.Add(new TodoItem(id, title, reminder, weekly, completed, Date(Cell(5), row.RowNumber())));
+            items.Add(new TodoItem(id, title, reminder, weekly, completed, Date(Cell(5), row.RowNumber()),
+                Cell(6)?.GetString().Trim() is { Length: > 0 } url ? url : null,
+                Date(Cell(7), row.RowNumber()), Date(Cell(8), row.RowNumber()),
+                Date(Cell(9), row.RowNumber()) is { } planned ? DateOnly.FromDateTime(planned.DateTime) : null));
         }
         return items.ToArray();
     }
@@ -100,8 +107,8 @@ internal static class TodoSpreadsheet
         return existing.Concat(imported.Where(item => ids.Add(item.Id) && tasks.Add(Identity(item)))).ToArray();
     }
 
-    private static (string Title, DateTimeOffset? Reminder, int Weekly, DateTimeOffset? Completed) Identity(TodoItem item) =>
-        (item.Title, item.Reminder, item.Weekly, item.CompletedAt);
+    private static (string Title, DateTimeOffset? Reminder, int Weekly, DateTimeOffset? Completed, string? Url, DateOnly? Day) Identity(TodoItem item) =>
+        (item.Title, item.Reminder, item.Weekly, item.CompletedAt, item.Url, item.PlannedDay);
 
     private static DateTimeOffset? Date(IXLCell? cell, int row)
     {

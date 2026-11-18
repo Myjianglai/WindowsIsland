@@ -59,6 +59,8 @@ dotnet run --project src/Island.App/Island.App.csproj
 
 ## AI 额度
 
+「AI 会话」是独立的功能页，显示 Codex、Claude Code 的运行状态、会话标题和最近活动。通过「设置 → AI 会话」安装或修复生命周期钩子，重启对应工具后生效。Codex 首次运行时需要确认信任钩子。可选的岛上审批支持允许本次、拒绝或交回终端。
+
 打开「设置 → AI 额度」。每个账号可单独设置名称、配色和固定状态。可固定最多 3 个账号；返回用量百分比的账号显示配额环。常规设置可选择单环或多环、工具首字母、已用或剩余显示。多环时每个账号最多三个同心环，在账号编辑页可单独选择每环对应的额度。余额或积分按原单位显示。额度首次跨过 70% 或 90% 时可提醒。
 
 点击「自动识别本机工具」可添加已发现的 Codex、Claude 或 Cursor。Codex 通过官方 CLI 复用登录。Claude 只使用用户提供的官方状态输出，安装 Claude 桌面版可被检测，只有存在可用状态文件才显示百分比。Cursor 可用官方 CLI 检查登录，个人额度仍以官方用量页面为准。
@@ -90,6 +92,10 @@ dotnet run --project src/Island.App/Island.App.csproj
 
 ## 下载与更新
 
+待办页可在待办、按日期保存的笔记和月历之间切换，Excel 导入导出覆盖全部日期。剪贴板与文件设置支持图片记录、条数、独立窗口、快捷键和文件中转自动清理。
+
+消息页按微信、企业微信、QQ 和邮箱分组。微信与企业微信可接收任务栏闪烁提醒，QQ 消息预览需要 Windows 通知访问权限，邮箱需要配置 IMAP。点击微信或企业微信提醒可打开已安装的客户端。收起态的消息预览保留约 5 秒。
+
 从 [公开下载页](https://github.com/Myjianglai/WindowsIsland-Releases/releases) 下载 Windows x64 版 `Island.exe`，双击运行。下载无需 GitHub 账号。
 
 在「设置 → 版本与更新」中检查最新版。自 v0.2.8 起，更新检查使用公开发布的 `update.json`，无需 GitHub 授权。点击「下载更新」可查看进度。小岛校验 SHA-256 后会询问是否安装并重启。也可以稍后在同一设置页点击「安装并重启」。EXE 所在目录需要有写入权限。
@@ -109,9 +115,8 @@ dotnet publish src/Island.App/Island.App.csproj -c Release -r win-x64 --self-con
 
 ## 后续阶段
 
-1. 剪贴板图片和文件、微信及企业微信系统通知。
-2. 用户指定文件夹的监听、IMAP 邮件、Microsoft To Do。
-3. Mica/Acrylic 原生材质。
+1. 用户指定文件夹的监听和 Microsoft To Do。
+2. Mica/Acrylic 原生材质。
 
 应用数据在本机处理及保存。邮箱和微软待办需要联网，后续设计为用户启用后直连所配置的 IMAP 服务或 Microsoft Graph。勾选完成会向 Graph 写入该待办的完成状态。
 

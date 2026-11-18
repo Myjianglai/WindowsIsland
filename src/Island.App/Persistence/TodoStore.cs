@@ -9,8 +9,13 @@ using System.Text.Json;
 namespace Island.App.Persistence;
 
 internal sealed record TodoItem(Guid Id, string Title, DateTimeOffset? Reminder, int Weekly,
-    DateTimeOffset? CompletedAt = null, DateTimeOffset? RemindedAt = null)
+    DateTimeOffset? CompletedAt = null, DateTimeOffset? RemindedAt = null, string? Url = null,
+    DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null, DateOnly? PlannedDay = null)
 {
+    public int? DurationMinutes => StartedAt is { } started && EndedAt is { } ended
+        ? Math.Max(0, (int)Math.Round((ended - started).TotalMinutes, MidpointRounding.AwayFromZero))
+        : null;
+
     public bool IsDone(DateTimeOffset now) => CompletedAt is { } completed
         && (Weekly == 0 || completed.LocalDateTime.Date == now.LocalDateTime.Date);
 

@@ -10,11 +10,13 @@ internal static class PanelIcons
     public static Path Page(IslandPage page) => Draw(page switch
     {
         IslandPage.Quota => "M3,16 H16 M5,13 V10 M9,13 V7 M13,13 V4 M3,7 L7,4 L10,5 L14,2",
+        IslandPage.Agent => "M4,6 H14 V14 H4 Z M9,6 V3 M2,9 V12 M16,9 V12 M7,9 V11 M11,9 V11",
         IslandPage.Music => "M7,13 V4 L15,2 V11 M7,13 A2,2 0 1 1 3,13 A2,2 0 1 1 7,13 M15,11 A2,2 0 1 1 11,11 A2,2 0 1 1 15,11",
         IslandPage.Clipboard => "M6,4 H3 V16 H15 V4 H12 M6,2 H12 V6 H6 Z M6,9 H12 M6,12 H12",
         IslandPage.Devices => "M3,5 H14 V13 H3 Z M16,7 V11 M6,7 V11 M9,7 V11",
         IslandPage.Shelf => "M2,6 H16 V15 H2 Z M4,6 L6,3 H12 L14,6 M7,9 H11",
         IslandPage.Todo => "M3,4 L4.5,5.5 L7,2.5 M9,4 H16 M3,9 L4.5,10.5 L7,7.5 M9,9 H16 M3,14 L4.5,15.5 L7,12.5 M9,14 H16",
+        IslandPage.Messages => "M3,13 L5,10 V7 A4,4 0 0 1 13,7 V10 L15,13 Z M7,15 Q9,18 11,15",
         IslandPage.Xiaohongshu => "M3,3 H15 V16 H3 Z M6,6 H12 M6,9 H12 M6,12 H10",
         _ => "M1,9 H5 L7,4 L10,14 L12,9 H17"
     });

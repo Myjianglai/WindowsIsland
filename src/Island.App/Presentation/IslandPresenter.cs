@@ -20,8 +20,21 @@ internal sealed class IslandPresenter
     private readonly IslandWindow _view;
     private readonly DispatcherTimer _pointer = new() { Interval = TimeSpan.FromMilliseconds(45) };
     private readonly DispatcherTimer _todoReminder = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly DispatcherTimer _agent = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private IslandState _state;
     private long? _outsideSince;
+    private long _shortcutOpened;
+
+    public void OpenClipboard()
+    {
+        if (!ClipboardSettings.Options.Separate)
+        {
+            if (_view.IsAvoided || _state == IslandState.Banner) return;
+            _shortcutOpened = Stopwatch.GetTimestamp();
+            ChangeState(IslandState.Expanded);
+        }
+        _view.OpenClipboard();
+    }
 
     public IslandPresenter(IslandWindow view)
     {
@@ -39,11 +52,14 @@ internal sealed class IslandPresenter
     public async Task RunAsync(IslandEventBus events, CancellationToken cancellationToken)
     {
         EventHandler remind = (_, _) => _view.CheckTodoReminders(events.TryPublish);
+        EventHandler agent = (_, _) => _view.CheckAgentActivity(events.TryPublish);
         try
         {
             _pointer.Start();
             _todoReminder.Tick += remind;
             _todoReminder.Start();
+            _agent.Tick += agent;
+            _agent.Start();
             await foreach (var message in events.ReadAllAsync(cancellationToken))
             {
                 if (message.Type == IslandEventType.Media)
@@ -72,6 +88,10 @@ internal sealed class IslandPresenter
                     _view.SetDevices(message);
                     continue;
                 }
+                _view.RecordMessage(message);
+                if (message.Type is IslandEventType.Notification or IslandEventType.Mail &&
+                    message.Source is "微信" or "企业微信" or "QQ" or "邮箱")
+                    continue;
                 while (_view.IsEditingTodo)
                     await Task.Delay(120, cancellationToken);
                 ChangeState(IslandState.Banner, message);
@@ -88,6 +108,8 @@ internal sealed class IslandPresenter
             _pointer.Stop();
             _todoReminder.Stop();
             _todoReminder.Tick -= remind;
+            _agent.Stop();
+            _agent.Tick -= agent;
         }
     }
 
@@ -112,7 +134,7 @@ internal sealed class IslandPresenter
                 ChangeState(IslandState.Expanded);
             }
         }
-        else if (_state == IslandState.Expanded)
+        else if (_state == IslandState.Expanded && Stopwatch.GetElapsedTime(_shortcutOpened) >= TimeSpan.FromSeconds(3))
         {
             _outsideSince ??= Stopwatch.GetTimestamp();
             if (Stopwatch.GetElapsedTime(_outsideSince.Value) >= TimeSpan.FromMilliseconds(135))

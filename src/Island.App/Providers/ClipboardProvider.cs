@@ -14,6 +14,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using Island.App.Persistence;
+using Island.App.UI;
 using Island.Core.Events;
 using Island.Core.Providers;
 
@@ -24,7 +25,6 @@ internal sealed partial class ClipboardProvider(HwndSource window) : IIslandProv
     public const string SourceId = "clipboard";
     private const string FileName = "clipboard-history.bin";
     private const int WmClipboardUpdate = 0x031D;
-    private const int RecentLimit = 30;
     private const long RecentByteLimit = 96L * 1024 * 1024;
     private enum Operation { Observe, Copy, TogglePin, Clear }
     private sealed record Command(Operation Operation, Guid EntryId = default);
@@ -103,7 +103,8 @@ internal sealed partial class ClipboardProvider(HwndSource window) : IIslandProv
                         case Operation.Observe:
                             Interlocked.Exchange(ref pendingObservation, 0);
                             var captured = await OnClipboardAsync(() => ClipboardFormats.Read(Clipboard.GetDataObject()), cancellationToken);
-                            if (ClipboardFormats.Finish(captured) is { } content)
+                            if (ClipboardFormats.Finish(captured) is { } content &&
+                                (content.Kind != ClipboardKind.Image || ClipboardSettings.Options.Images))
                             {
                                 changed = Remember(entries, content);
                             }
@@ -211,7 +212,7 @@ internal sealed partial class ClipboardProvider(HwndSource window) : IIslandProv
             var data = entry.Payload;
             bytes += (data.Png?.LongLength ?? 0) + 2L * (data.Text.Length + (data.Rtf?.Length ?? 0)
                 + (data.Html?.Length ?? 0) + (data.Csv?.Length ?? 0) + (data.Files?.Sum(path => path.Length) ?? 0));
-            return recent > RecentLimit || bytes > RecentByteLimit;
+            return recent > ClipboardSettings.Options.Keep || bytes > RecentByteLimit;
         });
     }
 
