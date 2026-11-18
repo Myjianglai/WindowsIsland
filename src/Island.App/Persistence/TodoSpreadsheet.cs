@@ -10,7 +10,7 @@ namespace Island.App.Persistence;
 
 internal static class TodoSpreadsheet
 {
-    private static readonly string[] Headers = ["标题", "提醒时间", "每周重复", "完成时间", "ID", "已提醒时间", "URL", "开始时间", "结束时间", "计划日期"];
+    private static readonly string[] Headers = ["标题", "提醒时间", "每周重复", "完成时间", "ID", "已提醒时间", "URL", "开始时间", "结束时间", "分钟数", "计划日期"];
     private static readonly string[] Days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
     public static void Export(string path, IReadOnlyList<TodoItem> items)
@@ -25,6 +25,7 @@ internal static class TodoSpreadsheet
         sheet.SheetView.FreezeRows(1);
         sheet.Column(1).Width = 38;
         sheet.Columns(2, Headers.Length).Width = 34;
+        sheet.Column(10).Width = 12;
         for (int i = 0; i < items.Count; i++)
         {
             var item = items[i];
@@ -38,7 +39,8 @@ internal static class TodoSpreadsheet
             sheet.Cell(row, 7).Value = item.Url ?? "";
             sheet.Cell(row, 8).Value = item.StartedAt?.ToString("o") ?? "";
             sheet.Cell(row, 9).Value = item.EndedAt?.ToString("o") ?? "";
-            sheet.Cell(row, 10).Value = item.PlannedDay?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "";
+            if (item.DurationMinutes is { } minutes) sheet.Cell(row, 10).Value = minutes;
+            sheet.Cell(row, 11).Value = item.PlannedDay?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "";
         }
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".xlsx";
         try
@@ -95,7 +97,7 @@ internal static class TodoSpreadsheet
             items.Add(new TodoItem(id, title, reminder, weekly, completed, Date(Cell(5), row.RowNumber()),
                 Cell(6)?.GetString().Trim() is { Length: > 0 } url ? url : null,
                 Date(Cell(7), row.RowNumber()), Date(Cell(8), row.RowNumber()),
-                Date(Cell(9), row.RowNumber()) is { } planned ? DateOnly.FromDateTime(planned.DateTime) : null));
+                Date(Cell(10), row.RowNumber()) is { } planned ? DateOnly.FromDateTime(planned.DateTime) : null));
         }
         return items.ToArray();
     }

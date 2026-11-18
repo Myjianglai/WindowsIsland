@@ -97,18 +97,19 @@
     <Setter Property="Padding" Value="14,4" />
   </Style>
 
-  <Style x:Key="IslandExcelButton" TargetType="Button" BasedOn="{StaticResource IslandButton}">
+  <Style x:Key="IslandPillButton" TargetType="Button" BasedOn="{StaticResource IslandButton}">
     <Setter Property="Padding" Value="10,4" />
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border x:Name="Face" CornerRadius="13" Background="{TemplateBinding Background}"
-                  Padding="{TemplateBinding Padding}">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-          </Border>
+          <Grid x:Name="Face">
+            <Border CornerRadius="13" Background="{TemplateBinding Background}" />
+            <Border x:Name="Tint" CornerRadius="13" Background="White" Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-              <Setter TargetName="Face" Property="Background" Value="{DynamicResource IslandEdge}" />
+              <Setter TargetName="Tint" Property="Opacity" Value="0.12" />
             </Trigger>
             <Trigger Property="IsPressed" Value="True">
               <Setter TargetName="Face" Property="Opacity" Value="0.75" />

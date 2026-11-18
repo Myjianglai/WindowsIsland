@@ -98,7 +98,6 @@ internal static class AppearanceSettings
     public static Border OrderRow<T>(string title, CheckBox value, T item, ObservableCollection<T> order,
         Action refresh, Func<bool>? canReorder = null) where T : struct, Enum
     {
-        const string format = "WindowsIsland.Settings.Order";
         var toggle = new CheckBox();
         toggle.SetBinding(ToggleButton.IsCheckedProperty, new Binding(nameof(ToggleButton.IsChecked))
         {
@@ -118,7 +117,6 @@ internal static class AppearanceSettings
         AutomationProperties.SetName(grip, $"调整{title}顺序");
         columns.Children.Add(grip);
         row.Background = Brushes.Transparent;
-        row.AllowDrop = true;
         bool Allowed() => canReorder?.Invoke() ?? true;
         void Move(int from, int to)
         {
@@ -126,34 +124,7 @@ internal static class AppearanceSettings
             order.Move(from, to);
             refresh();
         }
-        Point start = default;
-        grip.PreviewMouseLeftButtonDown += (_, e) => start = e.GetPosition(grip);
-        grip.PreviewMouseMove += (_, e) =>
-        {
-            if (!Allowed() || e.LeftButton != MouseButtonState.Pressed) return;
-            var delta = e.GetPosition(grip) - start;
-            if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
-                Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance) return;
-            DragDrop.DoDragDrop(grip, new DataObject(format, $"{typeof(T).Name}:{item}"), DragDropEffects.Move);
-        };
-        bool TryRead(DragEventArgs e, out T source)
-        {
-            source = default;
-            var prefix = typeof(T).Name + ":";
-            return Allowed() && e.Data.GetData(format) is string key && key.StartsWith(prefix, StringComparison.Ordinal) &&
-                Enum.TryParse(key[prefix.Length..], out source) && order.Contains(source);
-        }
-        row.DragOver += (sender, e) =>
-        {
-            e.Effects = TryRead(e, out _) ? DragDropEffects.Move : DragDropEffects.None;
-            e.Handled = true;
-        };
-        row.Drop += (_, e) =>
-        {
-            if (TryRead(e, out var source))
-                Move(order.IndexOf(source), order.IndexOf(item));
-            e.Handled = true;
-        };
+        AnimatedRowDrag.Attach(row, grip, Move, SettingsRows.Brush("#286FE1"), Allowed);
         grip.PreviewKeyDown += (_, e) =>
         {
             if (!Allowed() || Keyboard.Modifiers != ModifierKeys.Alt) return;

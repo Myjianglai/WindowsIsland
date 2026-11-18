@@ -377,13 +377,9 @@ internal sealed class ActivityPanel
 
     private async System.Threading.Tasks.Task OpenMessageAsync(MessageEntry entry)
     {
-        int index = _history.IndexOf(entry);
-        if (index >= 0 && entry.Unread)
-        {
-            _history[index] = entry with { Unread = false };
-            RenderMessages();
-            UnreadChanged?.Invoke();
-        }
+        if (!_history.Remove(entry)) return;
+        RenderMessages();
+        UnreadChanged?.Invoke();
         var item = entry.Event;
         if (item.Source is "微信" or "企业微信" && await ChatClientWindow.OpenAsync(item.Source)) return;
         var title = ExpandedTabs.Label(item.Title, 16);
@@ -548,6 +544,27 @@ internal sealed class ActivityPanel
             var highlight = new Border { Child = sessionContent, CornerRadius = new CornerRadius(8), Padding = new Thickness(7, 0, 4, 0),
                 Margin = new Thickness(0, 2, 0, 2), BorderThickness = new Thickness(1),
                 Background = Brushes.Transparent, BorderBrush = Brushes.Transparent };
+            if (item.State is not ("运行中" or "待确认"))
+            {
+                var remove = new MenuItem { Header = "从灵动岛移除" };
+                remove.Click += (_, _) =>
+                {
+                    var key = SessionKey(item);
+                    if (!_sessions.TryGetValue(key, out var current) || current.State is "运行中" or "待确认") return;
+                    _sessions.Remove(key);
+                    try { SaveSessions(); }
+                    catch (Exception)
+                    {
+                        _sessions[key] = current;
+                        highlight.ToolTip = "无法保存会话列表";
+                        return;
+                    }
+                    Render();
+                };
+                var menu = new ContextMenu { Items = { remove } };
+                menu.SetResourceReference(FrameworkElement.StyleProperty, "IslandExcelMenu");
+                highlight.ContextMenu = menu;
+            }
             highlight.MouseEnter += (_, _) =>
             {
                 highlight.SetResourceReference(Border.BackgroundProperty, IslandTheme.Tile);

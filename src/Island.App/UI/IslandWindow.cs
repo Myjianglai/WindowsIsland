@@ -188,7 +188,8 @@ internal sealed class IslandWindow : Window
         _surface.AllowDrop = true;
         _surface.PreviewDragOver += (_, e) =>
         {
-            e.Effects = _tabs.HasShelf && !_avoided && _state != IslandState.Banner && e.Data.GetDataPresent(DataFormats.FileDrop)
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+            e.Effects = _tabs.HasShelf && !_avoided && _state != IslandState.Banner
                 ? e.AllowedEffects & DragDropEffects.Copy : DragDropEffects.None;
             e.Handled = true;
         };

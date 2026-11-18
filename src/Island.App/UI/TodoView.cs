@@ -110,7 +110,7 @@ internal sealed class TodoView : Grid
         _progress.SetResourceReference(Control.ForegroundProperty, IslandTheme.Accent);
         var completion = new StackPanel { Orientation = Orientation.Horizontal, Children = { _progress, _counter } };
         _excel.Content = IconCaption("\uE9F9", "Excel");
-        _excel.SetResourceReference(StyleProperty, "IslandExcelButton");
+        _excel.SetResourceReference(StyleProperty, "IslandPillButton");
         _excel.Margin = new Thickness(8, 0, 0, 0);
         _excel.ToolTip = "导入或导出全部待办";
         System.Windows.Automation.AutomationProperties.SetName(_excel, "Excel 导入导出");
@@ -318,11 +318,16 @@ internal sealed class TodoView : Grid
                 clock.ToolTip = item.Reminder is { } at ? at.LocalDateTime.ToString("MM-dd HH:mm") : "设置提醒";
                 clock.Click += (_, _) => OpenEditor(item, reminder: true);
                 DockPanel.SetDock(clock, Dock.Right);
-                var start = ExpandedTabs.MakeFlatButton("▶");
+                var start = ExpandedTabs.MakeButton("");
+                start.Content = IconCaption("\uE768", "开始");
                 start.ToolTip = item.StartedAt is null ? "开始计时" : "重新开始计时";
                 start.Click += (_, _) => Replace(item with { StartedAt = DateTimeOffset.Now, EndedAt = null });
                 DockPanel.SetDock(start, Dock.Right);
-                var finish = ExpandedTabs.MakeFlatButton("■");
+                var finish = ExpandedTabs.MakeButton("");
+                finish.SetResourceReference(StyleProperty, "IslandPillButton");
+                finish.Background = SettingsRows.Brush("#C54D61");
+                finish.Foreground = Brushes.White;
+                finish.Content = IconCaption("\uE71A", new TextBlock { Text = "结束", FontSize = 12, Foreground = Brushes.White });
                 finish.ToolTip = item.StartedAt is null ? "请先开始计时" : item.EndedAt is null ? "结束计时" : $"已用 {item.DurationMinutes} 分钟";
                 finish.IsEnabled = item.StartedAt is not null && item.EndedAt is null;
                 finish.Click += (_, _) => Replace(item with { EndedAt = DateTimeOffset.Now });
@@ -352,15 +357,13 @@ internal sealed class TodoView : Grid
                 AddAction("开始计时", start);
                 AddAction("结束计时", finish);
                 var grip = ExpandedTabs.MakeFlatButton("⠿");
-                grip.ToolTip = "拖动排序，或点击查看操作";
-                grip.ContextMenu = options;
-                grip.Click += (_, _) => { options.PlacementTarget = grip; options.IsOpen = true; };
-                grip.PreviewMouseMove += (_, e) =>
-                {
-                    if (e.LeftButton == MouseButtonState.Pressed && grip.IsMouseCaptured)
-                        DragDrop.DoDragDrop(grip, new DataObject("WindowsIsland.Todo", item.Id.ToString()), DragDropEffects.Move);
-                };
-                var actions = new List<UIElement> { check, remove, grip };
+                grip.ToolTip = "按住拖动调整顺序";
+                System.Windows.Automation.AutomationProperties.SetName(grip, $"拖动调整「{item.Title}」的顺序");
+                grip.Cursor = Cursors.SizeAll;
+                var actions = new List<UIElement> { check };
+                if (!done || finish.IsEnabled) actions.Add(finish.IsEnabled ? finish : start);
+                actions.Add(remove);
+                actions.Add(grip);
                 if (TryHttpUrl(item.Url, out var validTarget))
                 {
                     var link = ExpandedTabs.MakeFlatButton("↗");
@@ -368,21 +371,20 @@ internal sealed class TodoView : Grid
                     link.Click += (_, _) => OpenUrl(validTarget);
                     AddAction("打开链接", link);
                 }
-                var row = new Border { Margin = new Thickness(0, 0, 0, 2), AllowDrop = true,
+                var row = new Border { Margin = new Thickness(0, 0, 0, 2), ContextMenu = options,
                     Child = new DockPanel { Children = { body } } };
-                row.Drop += (_, e) =>
+                var marker = TryFindResource(IslandTheme.Accent) as Brush ?? Brushes.DodgerBlue;
+                AnimatedRowDrag.Attach(row, grip, (from, to) =>
                 {
-                    if (e.Data.GetData("WindowsIsland.Todo") is not string source || !Guid.TryParse(source, out var id) || id == item.Id) return;
                     var reordered = _store.Items.ToList();
-                    var from = reordered.FindIndex(x => x.Id == id);
-                    var target = reordered.FindIndex(x => x.Id == item.Id);
-                    if (from < 0 || target < 0) return;
-                    var dragged = reordered[from];
-                    reordered.RemoveAt(from);
+                    int index = reordered.FindIndex(x => x.Id == items[from].Id);
+                    int target = reordered.FindIndex(x => x.Id == items[to].Id);
+                    if (index < 0 || target < 0) return;
+                    var dragged = reordered[index];
+                    reordered.RemoveAt(index);
                     reordered.Insert(target, dragged);
                     Commit(reordered.ToArray());
-                    e.Handled = true;
-                };
+                }, marker);
                 var dock = (DockPanel)row.Child;
                 foreach (var action in actions)
                 {

@@ -6,6 +6,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
+using System.Windows.Automation;
 using Microsoft.Win32;
 
 namespace Island.App.UI;
@@ -19,6 +20,17 @@ internal static class ChatClientWindow
         var processes = FindProcesses(names, out var executable);
         var window = FindMainWindow(processes, enterprise);
         if (await ActivateAsync(window)) return true;
+        if (processes.Count > 0)
+        {
+            // Launching the executable again can open a new sign-in window.
+            if (!await Task.Run(() => InvokeTrayIcon(enterprise))) return false;
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                await Task.Delay(150);
+                if (await ActivateAsync(FindMainWindow(processes, enterprise))) return true;
+            }
+            return false;
+        }
         executable ??= FindInstalledExecutable(names, enterprise ? ["企业微信", "WeCom"] : ["微信", "WeChat", "Weixin"]);
         if (executable is null) return false;
         try
@@ -36,6 +48,68 @@ internal static class ChatClientWindow
         }
         catch (System.ComponentModel.Win32Exception) { }
         catch (InvalidOperationException) { }
+        return false;
+    }
+
+    private static bool InvokeTrayIcon(bool enterprise)
+    {
+        try
+        {
+            var root = AutomationElement.RootElement;
+            var taskbars = root.FindAll(TreeScope.Children, new OrCondition(
+                new PropertyCondition(AutomationElement.ClassNameProperty, "Shell_TrayWnd"),
+                new PropertyCondition(AutomationElement.ClassNameProperty, "Shell_SecondaryTrayWnd")));
+            InvokePattern? overflowButton = null;
+            foreach (AutomationElement taskbar in taskbars)
+            {
+                if (TryInvokeChatIcon(taskbar, enterprise)) return true;
+                var toggle = taskbar.FindFirst(TreeScope.Descendants, new OrCondition(
+                    new PropertyCondition(AutomationElement.NameProperty, "显示隐藏的图标"),
+                    new PropertyCondition(AutomationElement.NameProperty, "Show hidden icons")));
+                if (toggle?.TryGetCurrentPattern(InvokePattern.Pattern, out object pattern) == true)
+                    overflowButton = (InvokePattern)pattern;
+            }
+            var overflow = new OrCondition(
+                new PropertyCondition(AutomationElement.ClassNameProperty, "TopLevelWindowForOverflowXamlIsland"),
+                new PropertyCondition(AutomationElement.ClassNameProperty, "NotifyIconOverflowWindow"));
+            bool TryOverflow()
+            {
+                foreach (AutomationElement panel in root.FindAll(TreeScope.Children, overflow))
+                    if (!panel.Current.IsOffscreen && TryInvokeChatIcon(panel, enterprise)) return true;
+                return false;
+            }
+            if (TryOverflow()) return true;
+            if (overflowButton is null) return false;
+            overflowButton.Invoke();
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                System.Threading.Thread.Sleep(75);
+                if (TryOverflow()) return true;
+            }
+            overflowButton.Invoke();
+        }
+        catch (ElementNotAvailableException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
+        return false;
+    }
+
+    private static bool TryInvokeChatIcon(AutomationElement container, bool enterprise)
+    {
+        string[] names = enterprise ? ["企业微信", "WeCom", "WeChat Work"] : ["微信", "WeChat", "Weixin"];
+        var controls = container.FindAll(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.IsInvokePatternAvailableProperty, true));
+        foreach (AutomationElement icon in controls)
+        {
+            var info = icon.Current;
+            string label = info.Name.Trim();
+            if (info.IsOffscreen || !names.Any(name => label.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+                label.StartsWith(name + ":", StringComparison.OrdinalIgnoreCase) ||
+                label.StartsWith(name + "：", StringComparison.OrdinalIgnoreCase))) continue;
+            if (!icon.TryGetCurrentPattern(InvokePattern.Pattern, out object pattern)) continue;
+            ((InvokePattern)pattern).Invoke();
+            return true;
+        }
         return false;
     }
 
@@ -142,7 +216,9 @@ internal static class ChatClientWindow
         EnumWindows((handle, _) =>
         {
             GetWindowThreadProcessId(handle, out uint pid);
-            if (!processes.Contains(pid) || GetWindow(handle, 4) != IntPtr.Zero) return true;
+            // A tray-hidden Qt window must be restored by the client itself.
+            if (!processes.Contains(pid) || !IsWindowVisible(handle) || !IsWindowEnabled(handle) ||
+                GetWindow(handle, 4) != IntPtr.Zero) return true;
             var className = new StringBuilder(256);
             GetClassName(handle, className, className.Capacity);
             var name = className.ToString();
@@ -166,11 +242,12 @@ internal static class ChatClientWindow
 
     private static async Task<bool> ActivateAsync(IntPtr window)
     {
-        if (window == IntPtr.Zero) return false;
-        ShowWindowAsync(window, IsIconic(window) ? 9 : 5);
+        if (window == IntPtr.Zero || !IsWindowVisible(window) || !IsWindowEnabled(window)) return false;
+        if (IsIconic(window)) ShowWindowAsync(window, 9);
         SetForegroundWindow(window);
         if (GetForegroundWindow() == window) return true;
         await Task.Delay(100);
+        if (!IsWindowVisible(window) || !IsWindowEnabled(window)) return false;
         SetForegroundWindow(window);
         return GetForegroundWindow() == window;
     }
@@ -182,6 +259,8 @@ internal static class ChatClientWindow
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int capacity);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int capacity);
     [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
