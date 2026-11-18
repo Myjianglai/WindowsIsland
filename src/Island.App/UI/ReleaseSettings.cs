@@ -16,7 +16,7 @@ namespace Island.App.UI;
 
 internal sealed class ReleaseSettings : StackPanel
 {
-    private const string ReleasesPage = "https://github.com/Myjianglai/WindowsIsland-Releases/releases";
+    private const string ReleasesPage = "https://github.com/Myjianglai/WindowsIsland/releases";
     private static readonly Version Current = typeof(ReleaseSettings).Assembly.GetName().Version!;
     private static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false });
     private static readonly SemaphoreSlim InstallGate = new(1, 1);

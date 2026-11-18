@@ -96,11 +96,11 @@ dotnet run --project src/Island.App/Island.App.csproj
 
 消息页按微信、企业微信、QQ 和邮箱分组。微信与企业微信可接收任务栏闪烁提醒，QQ 消息预览需要 Windows 通知访问权限，邮箱需要配置 IMAP。点击微信或企业微信提醒可打开已安装的客户端。收起态的消息预览保留约 5 秒。
 
-从 [公开下载页](https://github.com/Myjianglai/WindowsIsland-Releases/releases) 下载 Windows x64 版 `Island.exe`，双击运行。下载无需 GitHub 账号。
+从 [WindowsIsland 发布页](https://github.com/Myjianglai/WindowsIsland/releases) 下载 Windows x64 版 `Island.exe`，双击运行。下载无需 GitHub 账号。
 
 在「设置 → 版本与更新」中检查最新版。自 v0.2.8 起，更新检查使用公开发布的 `update.json`，无需 GitHub 授权。点击「下载更新」可查看进度。小岛校验 SHA-256 后会询问是否安装并重启。也可以稍后在同一设置页点击「安装并重启」。EXE 所在目录需要有写入权限。
 
-发布时更新 `src/Island.App/Island.App.csproj` 的 `Version`，提交并打上对应的 `v主版本.次版本.修订版本` 标签。将生成的 `Island.exe` 和 `update.json` 上传到公开下载仓库的同名 Release。清单包含 `version`（不带 `v`）、`size`（字节数）和 `sha256`（十六进制摘要）。
+发布时更新 `src/Island.App/Island.App.csproj` 的 `Version`，提交并打上对应的 `v主版本.次版本.修订版本` 标签。将生成的 `Island.exe` 和 `update.json` 上传到本仓库的同名 Release。清单包含 `version`（不带 `v`）、`size`（字节数）和 `sha256`（十六进制摘要）。迁移期间保留旧发布仓库，供旧客户端检查更新。
 
 ```powershell
 dotnet publish src/Island.App/Island.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=None -o src/Island.App/bin/releases
