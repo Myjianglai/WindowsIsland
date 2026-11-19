@@ -23,13 +23,19 @@ internal static class ChatClientWindow
         if (processes.Count > 0)
         {
             // Launching the executable again can open a new sign-in window.
-            if (!await Task.Run(() => InvokeTrayIcon(enterprise))) return false;
-            for (int attempt = 0; attempt < 12; attempt++)
+            if (await Task.Run(() => InvokeTrayIcon(enterprise)) && await WaitForActiveClient()) return true;
+            return enterprise && await Task.Run(() => InvokeTaskbarButton(executable)) && await WaitForActiveClient();
+
+            async Task<bool> WaitForActiveClient()
             {
-                await Task.Delay(150);
-                if (await ActivateAsync(FindMainWindow(processes, enterprise))) return true;
+                for (int attempt = 0; attempt < 18; attempt++)
+                {
+                    await Task.Delay(150);
+                    if (await ActivateAsync(FindMainWindow(processes, enterprise))) return true;
+                    if (enterprise && IsEnterprisePreviewActive(processes)) return true;
+                }
+                return false;
             }
-            return false;
         }
         executable ??= FindInstalledExecutable(names, enterprise ? ["企业微信", "WeCom"] : ["微信", "WeChat", "Weixin"]);
         if (executable is null) return false;
@@ -48,6 +54,40 @@ internal static class ChatClientWindow
         }
         catch (System.ComponentModel.Win32Exception) { }
         catch (InvalidOperationException) { }
+        return false;
+    }
+
+    private static bool IsEnterprisePreviewActive(HashSet<uint> processes)
+    {
+        var window = GetForegroundWindow();
+        if (window == IntPtr.Zero || !IsWindowVisible(window) || !IsWindowEnabled(window)) return false;
+        GetWindowThreadProcessId(window, out uint pid);
+        return processes.Contains(pid) && WindowClass(window) == "ImagePreview";
+    }
+
+    private static bool InvokeTaskbarButton(string? executable)
+    {
+        if (executable is null) return false;
+        try
+        {
+            var root = AutomationElement.RootElement;
+            var bars = root.FindAll(TreeScope.Children, new OrCondition(
+                new PropertyCondition(AutomationElement.ClassNameProperty, "Shell_TrayWnd"),
+                new PropertyCondition(AutomationElement.ClassNameProperty, "Shell_SecondaryTrayWnd")));
+            foreach (AutomationElement bar in bars)
+            foreach (AutomationElement button in bar.FindAll(TreeScope.Descendants,
+                         new PropertyCondition(AutomationElement.IsInvokePatternAvailableProperty, true)))
+            {
+                if (button.Current.IsOffscreen ||
+                    !button.Current.AutomationId.Equals("Appid: " + executable, StringComparison.OrdinalIgnoreCase) ||
+                    !button.TryGetCurrentPattern(InvokePattern.Pattern, out object pattern)) continue;
+                ((InvokePattern)pattern).Invoke();
+                return true;
+            }
+        }
+        catch (ElementNotAvailableException) { }
+        catch (InvalidOperationException) { }
+        catch (COMException) { }
         return false;
     }
 
@@ -219,9 +259,7 @@ internal static class ChatClientWindow
             // A tray-hidden Qt window must be restored by the client itself.
             if (!processes.Contains(pid) || !IsWindowVisible(handle) || !IsWindowEnabled(handle) ||
                 GetWindow(handle, 4) != IntPtr.Zero) return true;
-            var className = new StringBuilder(256);
-            GetClassName(handle, className, className.Capacity);
-            var name = className.ToString();
+            var name = WindowClass(handle);
             if (enterprise)
             {
                 if (name != "WeWorkWindow") return true;
@@ -238,6 +276,13 @@ internal static class ChatClientWindow
             return false;
         }, IntPtr.Zero);
         return window;
+    }
+
+    private static string WindowClass(IntPtr window)
+    {
+        var name = new StringBuilder(256);
+        GetClassName(window, name, name.Capacity);
+        return name.ToString();
     }
 
     private static async Task<bool> ActivateAsync(IntPtr window)

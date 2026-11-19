@@ -401,6 +401,11 @@ internal sealed class ActivityPanel
         panel.Children.Add(new ScrollViewer { Content = text, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var dialog = new Window { Title = $"{item.Source}消息", Width = 430, MaxHeight = 520,
             SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterScreen, Content = panel };
+        if (Application.Current.MainWindow is { } island)
+        {
+            foreach (var key in new[] { IslandTheme.Surface, IslandTheme.Ink, IslandTheme.Muted, IslandTheme.Tile, IslandTheme.Edge, "IslandButton" })
+                if (island.TryFindResource(key) is { } resource) dialog.Resources[key] = resource;
+        }
         dialog.SetResourceReference(Window.BackgroundProperty, IslandTheme.Surface);
         close.Click += (_, _) => dialog.Close();
         open.Click += async (_, _) =>

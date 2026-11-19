@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Island</AssemblyName>
-    <Version>0.3.1</Version>
+    <Version>0.3.2</Version>
     <ApplicationIcon>Assets/Island.ico</ApplicationIcon>
     <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
   </PropertyGroup>
