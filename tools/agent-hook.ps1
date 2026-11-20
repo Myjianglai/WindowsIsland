@@ -72,7 +72,9 @@ try {
         $hostPath = if ($orcaApp.Path) { $orcaApp.Path } else { Join-Path $env:LOCALAPPDATA 'Programs/orca/Orca.exe' }
         $hostPid = [int]$orcaApp.Id
     }
-    $model = [string]$payload.model
+    $model = if ($payload.model -is [string]) { $payload.model } elseif ($payload.model.id) {
+        [string]$payload.model.id
+    } elseif ($payload.model.display_name) { [string]$payload.model.display_name }
     $effort = [string]$payload.effort
     $permission = [string]$payload.permission_mode
     if ($Source -eq 'Codex' -and $transcriptPath -and (Test-Path -LiteralPath $transcriptPath -PathType Leaf)) {
@@ -95,7 +97,7 @@ try {
     $id = [Guid]::NewGuid().ToString('N')
     $data = @{ Id = $session; Source = $Source; Title = $title; State = $state
         Detail = $detail; Request = $request; Time = [DateTimeOffset]::UtcNow.ToString('o')
-        Model = $model; Effort = $effort; Permission = $permission
+        Model = [string]$model; Effort = $effort; Permission = $permission; TranscriptPath = $transcriptPath
         Tool = [string]$payload.tool_name; Prompt = [string]$prompt; Workspace = [string]$payload.cwd
         WindowKey = [string]$windowKey; HostPath = [string]$hostPath; HostPid = $hostPid
         Answer = $answer }

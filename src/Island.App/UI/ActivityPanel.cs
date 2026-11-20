@@ -27,12 +27,15 @@ internal sealed record ActivityOptions(bool Enabled = true, bool Codex = true, b
 internal sealed record AgentActivity(string Id, string Source, string Title, string State, string Detail,
     string Request, DateTimeOffset Time, string? Model = null, string? Tool = null, string? Prompt = null,
     bool Archived = false, string? Workspace = null, string? WindowKey = null, string? HostPath = null,
-    int HostPid = 0, string? Answer = null, string? Effort = null, string? Permission = null);
+    int HostPid = 0, string? Answer = null, string? Effort = null, string? Permission = null,
+    string? TranscriptPath = null);
 
 internal sealed class ActivityPanel
 {
     private static readonly string Folder = Path.Combine(LocalDataStore.DirectoryPath, "agent");
     private readonly Dictionary<(string, string), AgentActivity> _sessions = new();
+    private static readonly TimeSpan SessionRetention = TimeSpan.FromHours(2);
+    private (string Source, string Id)? _failedSession;
     private readonly Dictionary<string, ImageSource> _hostIcons = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, string> _codexTitles = new();
     private DateTime _codexIndexWriteTime;
@@ -56,6 +59,7 @@ internal sealed class ActivityPanel
         RenderMessages();
     }
     private DateTimeOffset _lastHeartbeat;
+    private DateTimeOffset _lastModelRefresh;
     private bool _showArchived;
     public static ActivityOptions Options { get; private set; } = Load();
     public static event Action? SettingsChanged;
@@ -94,8 +98,11 @@ internal sealed class ActivityPanel
     {
         try
         {
-            foreach (var entry in LocalDataStore.ReadProtected<AgentActivity[]>("agent-sessions.bin") ?? [])
-                _sessions[SessionKey(entry)] = entry with { Title = SessionTitle(entry) };
+            var saved = LocalDataStore.ReadProtected<AgentActivity[]>("agent-sessions.bin") ?? [];
+            foreach (var entry in saved)
+                _sessions[SessionKey(entry)] = entry with { Title = SessionTitle(entry), Prompt = null, Answer = null };
+            if (!RemoveExpiredSessions() && saved.Any(entry => entry.Prompt is not null || entry.Answer is not null))
+                SaveSessions();
         }
         catch (Exception) { }
         RefreshCodexTitles();
@@ -114,9 +121,22 @@ internal sealed class ActivityPanel
 
     private void SaveSessions()
     {
-        var history = _sessions.Values.Select(entry => entry with { Detail = "", Request = "",
-            State = entry.State is "运行中" or "待确认" ? "上次活动" : entry.State }).ToArray();
+        var history = _sessions.Values.Select(entry => entry with { Detail = "", Request = "", Prompt = null, Answer = null,
+            State = entry.State == "待确认" ? "请查看终端" : entry.State }).ToArray();
         LocalDataStore.WriteProtected("agent-sessions.bin", history);
+    }
+
+    private bool RemoveExpiredSessions()
+    {
+        var cutoff = DateTimeOffset.UtcNow - SessionRetention;
+        var expired = _sessions.Where(pair => pair.Value.Time < cutoff).Select(pair => pair.Key).ToArray();
+        if (expired.Length == 0) return false;
+        foreach (var key in expired) _sessions.Remove(key);
+        try { SaveSessions(); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (System.Security.Cryptography.CryptographicException) { }
+        return true;
     }
 
     private bool RefreshCodexTitles()
@@ -170,11 +190,12 @@ internal sealed class ActivityPanel
         return item.Title;
     }
 
-    public void Poll(Func<IslandEvent, bool> publish)
+    public void Poll(Func<IslandEvent, bool> publish, bool restoring = false)
     {
         try
         {
-            if (RefreshCodexTitles()) Render();
+            bool expired = RemoveExpiredSessions();
+            if (RefreshCodexTitles() || expired) Render();
             Directory.CreateDirectory(Folder);
             if (Options is { Enabled: true, Approval: true } &&
                 DateTimeOffset.UtcNow - _lastHeartbeat >= TimeSpan.FromSeconds(2))
@@ -182,14 +203,17 @@ internal sealed class ActivityPanel
                 LocalDataStore.WriteAtomic(Path.Combine(Folder, "heartbeat"), []);
                 _lastHeartbeat = DateTimeOffset.UtcNow;
             }
-            foreach (string path in Directory.EnumerateFiles(Folder, "*.event").OrderBy(File.GetLastWriteTimeUtc).Take(100))
+            foreach (string path in Directory.EnumerateFiles(Folder, "*.event").OrderBy(File.GetLastWriteTimeUtc).Take(restoring ? 1000 : 100))
             {
                 AgentActivity? activity;
                 try { activity = JsonSerializer.Deserialize<AgentActivity>(File.ReadAllText(path)); }
                 catch (JsonException) { activity = null; }
                 File.Delete(path);
                 if (activity is null || string.IsNullOrEmpty(activity.Id) || activity.Source is not ("Codex" or "Claude") ||
-                    activity.Title is null || !Visible(activity) || DateTimeOffset.UtcNow - activity.Time > TimeSpan.FromMinutes(3)) continue;
+                    activity.Title is null || !Visible(activity) || DateTimeOffset.UtcNow - activity.Time > SessionRetention) continue;
+                var age = DateTimeOffset.UtcNow - activity.Time;
+                if (activity.State == "待确认" && age > TimeSpan.FromSeconds(60))
+                    activity = activity with { State = "请查看终端", Request = "", Detail = "" };
                 var key = SessionKey(activity);
                 var existingKey = key;
                 if (!_sessions.ContainsKey(key))
@@ -205,6 +229,7 @@ internal sealed class ActivityPanel
                     activity = activity with { Model = Prefer(activity.Model, previous.Model), Prompt = Prefer(activity.Prompt, previous.Prompt),
                         Workspace = Prefer(activity.Workspace, previous.Workspace),
                         HostPath = Prefer(activity.HostPath, previous.HostPath),
+                        TranscriptPath = Prefer(activity.TranscriptPath, previous.TranscriptPath),
                         Effort = Prefer(activity.Effort, previous.Effort), Permission = Prefer(activity.Permission, previous.Permission),
                         HostPid = activity.HostPid != 0 ? activity.HostPid : previous.HostPid,
                         Answer = !string.IsNullOrWhiteSpace(activity.Answer) || activity.State == "运行中" ? activity.Answer : previous.Answer,
@@ -227,8 +252,9 @@ internal sealed class ActivityPanel
                 catch (System.Security.Cryptography.CryptographicException) { }
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
-                if (Options.Sound && previous?.State != activity.State) System.Media.SystemSounds.Asterisk.Play();
-                if (activity.State == "已完成" && Options.Completed || activity.State is "出错" or "待确认" && Options.Attention)
+                bool announce = !restoring && age <= TimeSpan.FromMinutes(3);
+                if (announce && Options.Sound && previous?.State != activity.State) System.Media.SystemSounds.Asterisk.Play();
+                if (announce && (activity.State == "已完成" && Options.Completed || activity.State is "出错" or "待确认" && Options.Attention))
                     publish(new IslandEvent(activity.Source, IslandEventType.Notification, activity.State,
                         activity.Title, timeout: TimeSpan.FromSeconds(Options.Seconds)));
                 Render();
@@ -239,9 +265,69 @@ internal sealed class ActivityPanel
                 _sessions[key] = _sessions[key] with { State = "请查看终端", Request = "" };
                 Render();
             }
+            RefreshClaudeModels();
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    private void RefreshClaudeModels()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastModelRefresh < TimeSpan.FromSeconds(2)) return;
+        _lastModelRefresh = now;
+        bool changed = false;
+        foreach (var key in _sessions.Where(pair => pair.Value.Source == "Claude" &&
+            pair.Value.State is "运行中" or "待确认" or "已完成").Select(pair => pair.Key).ToArray())
+        {
+            var item = _sessions[key];
+            if (string.IsNullOrWhiteSpace(item.TranscriptPath) || now - item.Time > TimeSpan.FromMinutes(10)) continue;
+            var after = string.IsNullOrWhiteSpace(item.Model) ? (DateTimeOffset?)null : item.Time;
+            if (ReadClaudeModel(item.TranscriptPath, after) is not { } model || model == item.Model) continue;
+            _sessions[key] = item with { Model = model };
+            changed = true;
+        }
+        if (!changed) return;
+        try { SaveSessions(); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (System.Security.Cryptography.CryptographicException) { }
+        Render();
+    }
+
+    private static string? ReadClaudeModel(string path, DateTimeOffset? after)
+    {
+        try
+        {
+            if (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".jsonl", StringComparison.OrdinalIgnoreCase))
+                return null;
+            using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            const int maxBytes = 256 * 1024;
+            file.Position = Math.Max(0, file.Length - maxBytes);
+            using var reader = new StreamReader(file, System.Text.Encoding.UTF8);
+            var lines = reader.ReadToEnd().Split('\n');
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                if (!lines[i].Contains("\"model\"", StringComparison.Ordinal)) continue;
+                try
+                {
+                    using var json = JsonDocument.Parse(lines[i]);
+                    var row = json.RootElement;
+                    if (row.ValueKind != JsonValueKind.Object ||
+                        !row.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || type.GetString() != "assistant" ||
+                        !row.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
+                        !message.TryGetProperty("model", out var model) || model.ValueKind != JsonValueKind.String) continue;
+                    if (after is { } cutoff &&
+                        (!row.TryGetProperty("timestamp", out var stamp) || stamp.ValueKind != JsonValueKind.String ||
+                         !stamp.TryGetDateTimeOffset(out var time) || time < cutoff)) continue;
+                    if (model.GetString() is { Length: > 0 } name && !name.StartsWith('<')) return name;
+                }
+                catch (JsonException) { }
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return null;
     }
 
     public void Record(IslandEvent message)
@@ -492,8 +578,19 @@ internal sealed class ActivityPanel
             details.Children.Add(timestamp);
             var open = ExpandedTabs.MakeFlatButton("↗");
             open.ToolTip = "打开 Agent 会话";
-            open.Click += (_, _) => { if (!OpenSession(item)) open.ToolTip = "无法打开 Agent 会话"; };
+            open.Click += (_, _) => OpenSessionAndNotify(item);
             details.Children.Add(open);
+            if (_failedSession == SessionKey(item))
+            {
+                timestamp.Visibility = Visibility.Collapsed;
+                open.Visibility = Visibility.Collapsed;
+                var notice = ExpandedTabs.Label(IsOrcaSession(item)
+                    ? "没找到对应的窗口，会话可能已经关掉了" : "无法打开 Agent 会话", 12);
+                notice.Foreground = SettingsRows.Brush("#F2C14E");
+                notice.Margin = new Thickness(6, 0, 4, 0);
+                notice.VerticalAlignment = VerticalAlignment.Center;
+                details.Children.Add(notice);
+            }
             if (HostIcon(item) is { } hostIcon) details.Children.Add(hostIcon);
             details.Children.Add(SourceIcon(item.Source));
             if (item.State is not ("运行中" or "待确认"))
@@ -525,7 +622,7 @@ internal sealed class ActivityPanel
             titleButton.HorizontalContentAlignment = HorizontalAlignment.Left;
             titleButton.ToolTip = new TextBlock { Text = string.Join(Environment.NewLine, tooltip),
                 TextWrapping = TextWrapping.Wrap, MaxWidth = 400 };
-            titleButton.Click += (_, _) => { if (!OpenSession(item)) titleButton.ToolTip = "无法打开 Agent 会话"; };
+            titleButton.Click += (_, _) => OpenSessionAndNotify(item);
             row.Children.Add(titleButton);
             var sessionContent = new StackPanel { Children = { row } };
             if (item.State is "运行中" or "待确认")
@@ -604,10 +701,15 @@ internal sealed class ActivityPanel
         }
         if (rows.Children.Count == 0)
         {
-            var empty = ExpandedTabs.Label("正在等待 Codex 或 Claude Code 会话", 13, IslandTheme.Muted);
-            rows.Children.Add(empty);
-            var help = ExpandedTabs.Label("在设置中安装钩子，然后在工具中发起一轮新任务。", 12, IslandTheme.Muted);
-            rows.Children.Add(help);
+            var empty = ExpandedTabs.Label("最近 2 小时没有 Agent 会话", 14);
+            empty.FontWeight = FontWeights.SemiBold;
+            empty.TextAlignment = TextAlignment.Center;
+            var help = ExpandedTabs.Label("在 Codex 或 Claude Code 中开始对话后，会话会显示在这里", 12, IslandTheme.Muted);
+            help.TextAlignment = TextAlignment.Center;
+            help.TextWrapping = TextWrapping.Wrap;
+            help.Margin = new Thickness(0, 5, 0, 0);
+            rows.Children.Add(new StackPanel { Margin = new Thickness(12, 58, 12, 12),
+                Children = { empty, help } });
         }
         Sessions.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 205, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
     }
@@ -647,10 +749,53 @@ internal sealed class ActivityPanel
         catch (Exception) { return null; }
     }
 
+    private void OpenSessionAndNotify(AgentActivity item)
+    {
+        var key = SessionKey(item);
+        if (!OpenSession(item))
+        {
+            if (_failedSession == key) return;
+            _failedSession = key;
+        }
+        else
+        {
+            if (_failedSession is null) return;
+            _failedSession = null;
+        }
+        Render();
+    }
+
+    private static bool IsOrcaSession(AgentActivity item) =>
+        item.WindowKey?.StartsWith("orca:", StringComparison.OrdinalIgnoreCase) == true ||
+        string.Equals(Path.GetFileName(item.HostPath), "Orca.exe", StringComparison.OrdinalIgnoreCase);
+
+    private static bool OpenOrca(AgentActivity item)
+    {
+        var hosts = Process.GetProcessesByName("Orca");
+        try
+        {
+            foreach (var host in hosts.OrderByDescending(process => process.Id == item.HostPid))
+            {
+                try
+                {
+                    var window = host.MainWindowHandle;
+                    if (window == IntPtr.Zero) continue;
+                    ShowWindowAsync(window, IsIconic(window) ? 9 : 5);
+                    if (SetForegroundWindow(window) || GetForegroundWindow() == window) return true;
+                }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+            }
+            return false;
+        }
+        finally { foreach (var host in hosts) host.Dispose(); }
+    }
+
     private static bool OpenSession(AgentActivity item)
     {
         try
         {
+            if (IsOrcaSession(item)) return OpenOrca(item);
             if (item.Source == "Claude" && item.HostPid > 0 && item.HostPath is not null)
             {
                 try
@@ -689,6 +834,9 @@ internal sealed class ActivityPanel
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     private static Brush StatusColor(string state) => SettingsRows.Brush(state switch
     {

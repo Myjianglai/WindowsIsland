@@ -89,9 +89,9 @@ internal sealed class IslandWindow : Window
         _tabs.Activity.Record(message);
     }
 
-    public void CheckAgentActivity(Func<IslandEvent, bool> publish)
+    public void CheckAgentActivity(Func<IslandEvent, bool> publish, bool restoring = false)
     {
-        _tabs.Activity.Poll(publish);
+        _tabs.Activity.Poll(publish, restoring);
         var running = _tabs.Activity.Running;
         (string Title, string Source, string State, int Count)? next = ActivityPanel.Options.Compact && running.Length > 0
             ? (running[0].Title, running[0].Source, running[0].State, running.Length) : null;

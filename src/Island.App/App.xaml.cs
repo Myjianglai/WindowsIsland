@@ -123,6 +123,7 @@ public partial class App : Application
             ReleaseInstaller.Cleanup();
         });
         ApplyPreferences(_preferences);
+        window.CheckAgentActivity(_events.TryPublish, restoring: true);
         _music = new ProviderHost(_musicProvider, _events,
             () => MusicProvider.Status("请在设置中启用音乐"),
             () => MusicProvider.Status("无法连接 Windows 播放会话"), _shutdown.Token);
