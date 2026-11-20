@@ -2,6 +2,22 @@
 
 Windows 上的 C# WPF 桌面应用。默认在屏幕顶部收起，鼠标靠近时向工作区展开。
 
+## macOS 预览版
+
+可从 [macOS 预览发布页](https://github.com/Myjianglai/WindowsIsland/releases/tag/v0.3.3-macos-preview.1) 下载 Apple 芯片和 Intel 安装包。
+
+macOS 工程位于 `src/Island.Mac`，使用 Avalonia，并与 Windows 版共用待办模型、Excel 导入导出和本地歌词解析。预览版可在 Windows 上交叉打包。需要 .NET 10 SDK 和 Python 3.11 或更高版本。
+
+```powershell
+python tools/package-macos.py
+```
+
+产物位于 `src/Island.Mac/bin/macos`，要求 macOS 14 或更新版本。Apple 芯片选 `osx-arm64` ZIP，Intel 芯片选 `osx-x64` ZIP。两者都包含 .NET 运行时。解压后把 `Island.app` 移到「应用程序」再打开。预览包未签名、未公证，macOS 可能要求在「系统设置 → 隐私与安全性」中确认打开。
+
+预览版包含悬浮岛和菜单栏、AI 会话钩子及 Codex / Claude 额度、待办与按日笔记、Excel、Apple Music / Spotify 控制与本地歌词、文本剪贴板、文件中转、系统统计、设备报告、IMAP 未读邮件，以及浏览器中的小红书。钩子需要在设置中安装，音乐控制需要 macOS 自动化权限。剪贴板记录默认关闭，启用后存储在当前用户私有目录内。邮箱授权码仅在本次运行内使用。
+
+微信、企业微信和 QQ 目前仅支持打开客户端。第三方聊天通知接收、岛上审批、富剪贴板、系统级媒体会话、外设协议级电量、内嵌小红书和自动更新尚未移植。预览包已验证 ZIP 结构和 Mach-O 架构，macOS 启动与权限流程需真机确认。
+
 ## 项目目录
 
 ```text

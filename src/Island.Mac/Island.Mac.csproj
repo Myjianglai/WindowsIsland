@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>IslandMac</AssemblyName>
+    <Version>0.3.3</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NuGetAudit>true</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.23" />
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="MailKit" Version="5.0.0" />
+    <AvaloniaResource Include="Island.png" />
+    <ProjectReference Include="../Island.Core/Island.Core.csproj" />
+    <Compile Include="../Island.App/Persistence/TodoStore.cs" Link="Shared/TodoStore.cs" />
+    <Compile Include="../Island.App/Persistence/TodoSpreadsheet.cs" Link="Shared/TodoSpreadsheet.cs" />
+    <Compile Include="../Island.App/Providers/LocalLyrics.cs" Link="Shared/LocalLyrics.cs" />
+  </ItemGroup>
+</Project>
